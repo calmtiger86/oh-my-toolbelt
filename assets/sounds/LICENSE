@@ -1,0 +1,16 @@
+done.wav (bell), chime.wav, ding.wav, digital.wav, marimba.wav, soft.wav
+
+Made for Oh My Toolbelt by short scripts that add sine tones with decays,
+44.1 kHz, 16-bit mono. No recording or third-party sample is used.
+
+- done.wav (bell): 880 Hz, then 1318.5 Hz 0.18 s later, each with a quiet
+  octave partial; 1.1 s.
+- chime.wav: 1046.5, 1318.5 and 1568 Hz, 0.16 s apart, with soft partials; 1.4 s.
+- ding.wav: 1568 Hz with partials at 2.76x and 5.4x; 1.2 s.
+- digital.wav: three 1000 Hz beeps of odd harmonics, 0.15 s apart; 0.5 s.
+- marimba.wav: 784 Hz then 1046.5 Hz, with 4x and 10x partials, short decays; 0.9 s.
+- soft.wav: 523.25 Hz and 659.25 Hz with a slow attack; 1.6 s.
+
+To the extent possible under law, the authors have dedicated these sounds
+to the public domain under CC0 1.0 Universal:
+https://creativecommons.org/publicdomain/zero/1.0/

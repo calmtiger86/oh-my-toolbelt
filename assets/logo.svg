@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-labelledby="title">
+  <title id="title">Oh My Toolbelt</title>
+  <rect width="1024" height="1024" rx="232" fill="#1f1f22"/>
+  <!-- The belt: a strap with its buckle and three tools, above the prompt. -->
+  <rect x="112" y="300" width="800" height="196" rx="98" fill="#d77757"/>
+  <rect x="166" y="340" width="168" height="116" rx="30" fill="none" stroke="#f6ede4" stroke-width="26"/>
+  <rect x="240" y="327" width="22" height="142" rx="11" fill="#f6ede4"/>
+  <g fill="#f6ede4">
+    <rect x="392" y="346" width="104" height="104" rx="26"/>
+    <rect x="532" y="346" width="104" height="104" rx="26"/>
+    <rect x="672" y="346" width="104" height="104" rx="26"/>
+  </g>
+  <!-- A clock, a play mark (a prompt button) and note lines. -->
+  <g fill="none" stroke="#1f1f22" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="444" cy="398" r="31" stroke-width="12"/>
+    <path d="M444 380v20l14 10" stroke-width="12"/>
+    <path d="M708 378h40M708 398h40M708 418h26" stroke-width="12"/>
+  </g>
+  <path d="M570 372v52l42-26z" fill="#1f1f22"/>
+  <circle cx="830" cy="398" r="14" fill="#1f1f22" fill-opacity="0.55"/>
+  <circle cx="872" cy="398" r="14" fill="#1f1f22" fill-opacity="0.55"/>
+  <!-- The prompt beneath it. -->
+  <path d="M190 620l70 60-70 60" fill="none" stroke="#f6ede4" stroke-width="44" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="320" y="700" width="230" height="44" rx="22" fill="#d77757"/>
+</svg>

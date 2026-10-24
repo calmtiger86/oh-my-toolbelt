@@ -1,0 +1,46 @@
+# Checks the mod on Linux, macOS and Windows, with the Claude Code version it is written for and the newest one:
+# `claude plugin validate` and `claude plugin test`. The weekly run shows a change in the mod API within a week.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: '17 3 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-14, windows-2025]
+        claude: ['2.1.309', latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
+    env:
+      DISABLE_AUTOUPDATER: '1'
+    steps:
+      # Actions pinned to a commit, so a moved tag runs no other code; the comment names the tag it was.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+      - run: npm install -g @anthropic-ai/claude-code@${{ matrix.claude }}
+      - run: claude --version
+      # Every gating hook carries a .catch.
+      - run: |
+          claude plugin validate . | tee "$RUNNER_TEMP/validate.txt"
+          grep -q 'Validation passed' "$RUNNER_TEMP/validate.txt"
+          if grep -q 'without .catch' "$RUNNER_TEMP/validate.txt"; then exit 1; fi
+      # ponytail: no tsc here, the engine lays .claude-plugin/types/ only when it loads the mod; run tsc locally
+      - run: claude plugin test .

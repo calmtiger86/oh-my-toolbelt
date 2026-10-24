@@ -1,0 +1,15 @@
+{
+  "name": "oh-my-toolbelt",
+  "owner": {
+    "name": "calmtiger86"
+  },
+  "description": "Oh My Toolbelt, a Claude Code mod: a toolbelt above the prompt.",
+  "plugins": [
+    {
+      "name": "oh-my-toolbelt",
+      "source": "./",
+      "description": "A toolbelt above the prompt: clock, date, weather and pomodoro on the left, your prompts, commands and actions on the right.",
+      "category": "productivity"
+    }
+  ]
+}

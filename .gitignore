@@ -1,0 +1,20 @@
+# Type files Claude Code writes when it loads the mod
+.claude-plugin/types/
+.mcpb-cache/
+
+# OS and editor files
+.DS_Store
+*~
+*.swp
+*.log
+node_modules/
+
+# Local secrets and session state
+.env
+.env.*
+.omc/
+
+# Agent hand-off notes
+.planning/
+.senpai/
+.claude/
