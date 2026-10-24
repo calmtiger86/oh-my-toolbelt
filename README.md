@@ -34,7 +34,7 @@ The little things that trip you up when the terminal is new, eased by one toolbe
 claude plugin install oh-my-toolbelt --marketplace calmtiger86/oh-my-toolbelt
 ```
 
-One line. If Claude Code is already open, type `/reload-plugins` there to turn it on. It starts quiet: no network until you pick a weather city, no clipboard history until you turn it on, and nothing you write in it leaves your computer unless you send it as a prompt.
+One line. If Claude Code is already open, type `/reload-plugins` there to turn it on. If the install ends with `userConfig options not yet set`, that is fine: every setting starts at its default. It starts quiet: no network until you pick a weather city, no clipboard history until you turn it on, and nothing you write in it leaves your computer unless you send it as a prompt.
 
 **In the desktop app:** open **+** → **Add plugins** (or **Plugins** → **Browse plugins**), add the marketplace from its repository, `calmtiger86/oh-my-toolbelt`, then pick oh-my-toolbelt in the list and install it. Running the terminal command above once works too: the terminal and the desktop app's local sessions read the same settings.
 
