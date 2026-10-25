@@ -4,6 +4,7 @@ import { expect, test } from 'claude-code/testing'
 import type { ClipBoard } from '../types/index'
 import type { EngineInterface } from 'claude-code'
 import { CLIPS_MAX, CLIP_CHARS_MAX, clipEffects, noteSelection, restoreClips, withReading } from '../hooks/clips'
+import { engineOf } from '../hooks/register'
 import { TEST_OPTIONS, boot, keysOf, mountPane } from './helpers'
 
 const EMPTY: ClipBoard = { clips: [], seen: null, changing: null }
@@ -81,19 +82,22 @@ test('in a terminal Claude Code draws in full, each new selection is listed; Ins
 test('a /clear, which empties the state, gives the list back', async () => {
   const held = { value: EMPTY as ClipBoard | undefined, version: 0 }
   const stand = {
+    // engineOf reads the plugin's name and root once.
+    plugin: { name: 'oh-my-toolbelt', root: '/' },
     ui: { selection: async () => ({ text: 'kept copy' }) },
     state: {
       get: async () => ({ value: held.value, version: held.version }),
       set: async (_: unknown, value: ClipBoard) => ((held.value = value), (held.version += 1), { isSet: true, version: held.version }),
     },
   } as unknown as EngineInterface
-  await noteSelection(stand, 1000)
+  const engine = engineOf(stand)
+  await noteSelection(engine, 1000)
   held.value = undefined
-  await restoreClips(stand)
+  await restoreClips(engine)
   expect(held.value).toEqual({ clips: [{ id: 'c1000', text: 'kept copy' }], seen: null, changing: null })
   // Regression: Insert on a clip gone since the tab was drawn did nothing, saying nothing.
-  expect(await clipEffects(stand, 'c1000', 'gone')).toEqual([{ kind: 'prompt.fill', text: 'kept copy', mode: 'insert' }])
-  expect(await clipEffects(stand, 'c999', 'gone')).toEqual([{ kind: 'ui.toast', text: 'gone' }])
+  expect(await clipEffects(engine, 'c1000', 'gone')).toEqual([{ kind: 'prompt.fill', text: 'kept copy', mode: 'insert' }])
+  expect(await clipEffects(engine, 'c999', 'gone')).toEqual([{ kind: 'ui.toast', text: 'gone' }])
 })
 
 test('with the tab off, nothing is read and there is no such tab', { options: TEST_OPTIONS }, async ($, on) => {

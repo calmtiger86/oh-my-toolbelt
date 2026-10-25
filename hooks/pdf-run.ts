@@ -1,8 +1,8 @@
 // PDF export: the html export printed by a Chromium browser the person picked in `pdfBrowser`. No API names the system:
 // Windows says so in `OS`, a macOS or Windows app is found by its install paths, and anything else is taken as Linux,
 // where the browser runs by its name from PATH, each name tried until one starts.
-import type { EngineInterface } from 'claude-code'
 import { isWindows } from './lib/platform'
+import type { Engine } from './runtime'
 
 export const PDF_TIMEOUT_MS = 60_000
 const BROWSERS = ['chrome', 'edge', 'brave', 'chromium'] as const
@@ -47,9 +47,9 @@ export function browserCandidates(setting: unknown, places: BrowserPlaces): { pa
   return { paths: wanted.flatMap(browser => macRoots.map(root => `${root}/${MAC_APPS[browser]}`)), names: wanted.flatMap(browser => LINUX_NAMES[browser]) }
 }
 
-export async function browserPlaces($: EngineInterface): Promise<BrowserPlaces> {
-  const programFiles = [await $.env.get('ProgramFiles'), await $.env.get('ProgramFiles(x86)'), await $.env.get('LOCALAPPDATA')]
-  return { os: await $.env.get('OS'), home: await $.env.get('HOME'), programFiles }
+export async function browserPlaces(engine: Engine): Promise<BrowserPlaces> {
+  const programFiles = [await engine.env.get('ProgramFiles'), await engine.env.get('ProgramFiles(x86)'), await engine.env.get('LOCALAPPDATA')]
+  return { os: await engine.env.get('OS'), home: await engine.env.get('HOME'), programFiles }
 }
 
 // A file path as the browser opens it: forward slashes, and the characters a URL reads as its own escaped.
@@ -62,18 +62,18 @@ export const printArgv = (browser: string, htmlPath: string, pdfPath: string, os
   [browser, '--headless=new', '--disable-gpu', '--no-pdf-header-footer', `--print-to-pdf=${pdfPath}`, fileUrl(htmlPath, os)]
 
 // The programs to print with: the installed apps first; on Linux the names, which only running tells apart.
-export async function findBrowsers($: EngineInterface, setting: unknown, places: BrowserPlaces): Promise<string[]> {
+export async function findBrowsers(engine: Engine, setting: unknown, places: BrowserPlaces): Promise<string[]> {
   const { paths, names } = browserCandidates(setting, places)
-  const installed = (await Promise.all(paths.map(async path => ((await $.fs.exists(path)) ? [path] : [])))).flat()
+  const installed = (await Promise.all(paths.map(async path => ((await engine.fs.exists(path)) ? [path] : [])))).flat()
   return installed.length > 0 ? installed.slice(0, 1) : names
 }
 
 // `printed` once the file is there; `failed` when a browser ran and made none; `absent` when none would start.
-export async function printPdf($: EngineInterface, browsers: readonly string[], htmlPath: string, pdfPath: string, os: string | undefined): Promise<'printed' | 'failed' | 'absent'> {
+export async function printPdf(engine: Engine, browsers: readonly string[], htmlPath: string, pdfPath: string, os: string | undefined): Promise<'printed' | 'failed' | 'absent'> {
   for (const browser of browsers) {
-    const result = await $.process.run(printArgv(browser, htmlPath, pdfPath, os), { timeoutMs: PDF_TIMEOUT_MS }).catch(() => null)
+    const result = await engine.process.run(printArgv(browser, htmlPath, pdfPath, os), { timeoutMs: PDF_TIMEOUT_MS }).catch(() => null)
     if (result === null) continue
-    return result.exitCode === 0 && (await $.fs.exists(pdfPath)) ? 'printed' : 'failed'
+    return result.exitCode === 0 && (await engine.fs.exists(pdfPath)) ? 'printed' : 'failed'
   }
   return 'absent'
 }

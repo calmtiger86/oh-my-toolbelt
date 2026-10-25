@@ -5,10 +5,9 @@
 // rows from plugin.json and keeps a change in the store, applied at once. A terminal, whose list has the rows, writes
 // each kept change to /config and drops it. A /config change made after one wins: each keeps the value it replaced.
 // ponytail: a desktop session cannot see a row an organization locks; the terminal drops such a change and names it
-import type { ConfigRow, ConfigValue, EngineInterface, PluginOptions } from 'claude-code'
-import { writeConfig } from './config-write'
+import type { ConfigRow, ConfigValue, PluginOptions } from 'claude-code'
 import { CONFIG_PREFIX } from './runtime'
-import type { Versions } from './runtime'
+import type { Engine, Versions } from './runtime'
 
 // One store key per setting, so two changes at once, in one session or two, never write over each other.
 export const OVERRIDE_PREFIX = 'settingsOverride.'
@@ -58,36 +57,36 @@ export function manifestRows(manifest: unknown, options: PluginOptions): ConfigR
 }
 
 // plugin.json sits in `.claude-plugin/` under the mod's folder, `$.plugin.root` (2.1.309, checked in an SDK session).
-export async function readManifest($: EngineInterface): Promise<unknown> {
-  return JSON.parse(await $.fs.read(`${$.plugin.root}/.claude-plugin/plugin.json`))
+export async function readManifest(engine: Engine): Promise<unknown> {
+  return JSON.parse(await engine.fs.read(`${engine.plugin.root}/.claude-plugin/plugin.json`))
 }
 
 // The status tab's versions: the toolbelt's from plugin.json, Claude Code's from the engine.
-export async function readVersions($: EngineInterface): Promise<Versions> {
-  const manifest = await readManifest($)
+export async function readVersions(engine: Engine): Promise<Versions> {
+  const manifest = await readManifest(engine)
   const version = typeof manifest === 'object' && manifest !== null ? (manifest as { version?: unknown }).version : undefined
   if (typeof version !== 'string') throw new Error('plugin.json has no version')
-  return { toolbelt: version, claudeCode: (await $.session.version()).version }
+  return { toolbelt: version, claudeCode: (await engine.session.version()).version }
 }
 
-async function readOverrides($: EngineInterface): Promise<Overrides> {
-  const keys = (await $.store.keys()).filter(key => key.startsWith(OVERRIDE_PREFIX))
-  const entries = await Promise.all(keys.map(async key => [key.slice(OVERRIDE_PREFIX.length), await $.store.get(key)] as const))
+async function readOverrides(engine: Engine): Promise<Overrides> {
+  const keys = (await engine.store.keys()).filter(key => key.startsWith(OVERRIDE_PREFIX))
+  const entries = await Promise.all(keys.map(async key => [key.slice(OVERRIDE_PREFIX.length), await engine.store.get(key)] as const))
   return Object.fromEntries(entries.filter((entry): entry is readonly [string, Override] => isOverride(entry[1])))
 }
 
 // At start and after a change: the options with the kept changes, and how many there are. Nothing is written.
-export async function loadOverrides($: EngineInterface, options: PluginOptions): Promise<{ options: PluginOptions; count: number }> {
-  const merged = applyOverrides(options, await readOverrides($))
+export async function loadOverrides(engine: Engine, options: PluginOptions): Promise<{ options: PluginOptions; count: number }> {
+  const merged = applyOverrides(options, await readOverrides(engine))
   return { options: merged.options, count: Object.keys(merged.kept).length }
 }
 
 // A change made in the status tab where the engine lists no rows; one back to the engine's value leaves the store.
-export async function saveOverride($: EngineInterface, options: PluginOptions, field: string, value: ConfigValue): Promise<void> {
+export async function saveOverride(engine: Engine, options: PluginOptions, field: string, value: ConfigValue): Promise<void> {
   if (!isScalar(value)) throw new Error(`${field} takes a toggle or a choice`)
   const base = baseOf(options, field)
-  if (value === base) return $.store.delete(`${OVERRIDE_PREFIX}${field}`)
-  return $.store.set(`${OVERRIDE_PREFIX}${field}`, { value, base })
+  if (value === base) return engine.store.delete(`${OVERRIDE_PREFIX}${field}`)
+  return engine.store.set(`${OVERRIDE_PREFIX}${field}`, { value, base })
 }
 
 // Once a terminal lists the rows, each kept change leaves the store and is written to /config. One /config changed
@@ -97,25 +96,25 @@ export async function saveOverride($: EngineInterface, options: PluginOptions, f
 // how many were written, as a written one reloads the module, and why any failed.
 export type Moved = { refused: string[]; moved: number; failed: string[] }
 
-export async function moveOverrides($: EngineInterface, options: PluginOptions, rows: readonly ConfigRow[]): Promise<Moved> {
+export async function moveOverrides(engine: Engine, options: PluginOptions, rows: readonly ConfigRow[]): Promise<Moved> {
   const refused: string[] = []
   const failed: string[] = []
   let moved = 0
-  for (const [field, change] of Object.entries(await readOverrides($))) {
+  for (const [field, change] of Object.entries(await readOverrides(engine))) {
     const key = `${OVERRIDE_PREFIX}${field}`
     const row = rows.find(r => r.key === `${CONFIG_PREFIX}${field}`)
-    await $.store.delete(key)
+    await engine.store.delete(key)
     if (row === undefined || baseOf(options, field) !== change.base) continue
     if (row.isLocked) {
       refused.push(row.label)
       continue
     }
     try {
-      const result = await writeConfig($, row.key, change.value)
+      const result = await engine.config.write(row.key, change.value)
       if (result.deny !== undefined) refused.push(row.label)
       else moved += 1
     } catch (err) {
-      await $.store.set(key, change)
+      await engine.store.set(key, change)
       failed.push(`${field}: ${err instanceof Error ? err.message : String(err)}`)
     }
   }

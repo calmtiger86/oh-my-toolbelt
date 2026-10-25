@@ -5,6 +5,7 @@
 import { expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { EngineInterface, On, RenderSurface } from 'claude-code'
+import { engineOf } from '../hooks/register'
 import { readRows } from '../hooks/toc-history'
 import { READ_CAP, TAIL_PATH } from '../hooks/tools/transcript'
 import { NOW, PLUGIN, SURFACES, TEST_OPTIONS, boot, hostless, isManifestPath, mountBand, mountPane, runCommand } from './helpers'
@@ -477,6 +478,8 @@ function standIn(o: { starts: (argv: readonly string[]) => boolean; code?: numbe
     return o.tail === 'there' && path === TAIL_PATH
   }
   const $ = {
+    // engineOf reads the plugin's name and root once.
+    plugin: { name: PLUGIN, root: '/' },
     env: { get: async (name: string) => (calls.push(`env ${name}`), o.env?.[name]) },
     fs: { read, exists, stat: async (path: string) => (calls.push(`stat ${path}`), { kind: 'file', size: o.refused?.size ?? FILE.length, mtimeMs: 0, isLink: false }) },
     process: { spawn: (request: Spawned) => (calls.push(`spawn ${request.argv[0]}${request.env === undefined ? '' : ` ${JSON.stringify(request.env)}`}`), child(request.argv)) },
@@ -489,38 +492,38 @@ const POWERSHELL = 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.e
 
 test('up to 4 MiB the file is one read; past it tail streams it, and on Windows PowerShell by its full path', async () => {
   const posix = standIn({ starts: () => true })
-  const small = await readRows(posix.$, PATH, READ_CAP)
-  const large = await readRows(posix.$, PATH, READ_CAP + 1)
+  const small = await readRows(engineOf(posix.$), PATH, READ_CAP)
+  const large = await readRows(engineOf(posix.$), PATH, READ_CAP + 1)
   expect(posix.calls).toEqual([`read ${PATH}`, 'spawn tail'])
   expect(large).toEqual(small)
   expect(small.map(row => row.uuid)).toEqual([1, 2, 3, 4, 5, 6, 7].map(id))
   const windows = standIn({ starts: argv => argv[0] === POWERSHELL, env: { SystemRoot: 'C:\\Windows' } })
-  expect(await readRows(windows.$, WINDOWS_PATH, READ_CAP + 1)).toEqual(small)
+  expect(await readRows(engineOf(windows.$), WINDOWS_PATH, READ_CAP + 1)).toEqual(small)
   expect(windows.calls).toEqual(['env SystemRoot', `spawn ${POWERSHELL} ${JSON.stringify({ TOOLBELT_TRANSCRIPT: WINDOWS_PATH })}`])
   // Where /usr/bin/tail is there it runs by that path; a look for it that is refused names tail alone.
   const there = standIn({ starts: () => true, tail: 'there' })
-  expect(await readRows(there.$, PATH, READ_CAP + 1)).toEqual(small)
+  expect(await readRows(engineOf(there.$), PATH, READ_CAP + 1)).toEqual(small)
   expect(there.calls).toEqual(['spawn /usr/bin/tail'])
   const unlooked = standIn({ starts: () => true, tail: 'refused' })
-  expect(await readRows(unlooked.$, PATH, READ_CAP + 1)).toEqual(small)
+  expect(await readRows(engineOf(unlooked.$), PATH, READ_CAP + 1)).toEqual(small)
   expect(unlooked.calls).toEqual(['spawn tail'])
   // A PowerShell that cannot start fails the read, which leaves the drawn rows.
   const missing = standIn({ starts: () => false })
-  expect(await failureOf(readRows(missing.$, WINDOWS_PATH, READ_CAP + 1))).toBe(`${POWERSHELL}: command not found`)
+  expect(await failureOf(readRows(engineOf(missing.$), WINDOWS_PATH, READ_CAP + 1))).toBe(`${POWERSHELL}: command not found`)
   const failing = standIn({ starts: () => true, code: 1 })
   let failure = ''
-  await readRows(failing.$, PATH, READ_CAP + 1).catch((err: unknown) => (failure = err instanceof Error ? err.message : String(err)))
+  await readRows(engineOf(failing.$), PATH, READ_CAP + 1).catch((err: unknown) => (failure = err instanceof Error ? err.message : String(err)))
   expect(failure).toBe('tail ended with 1')
 })
 
 // Regression: the engine appends to the file while it is read.
 test('a read refused as the file grew past 4 MiB since its size was taken streams it after all; another refusal stays one', async () => {
   const grown = standIn({ starts: () => true, refused: { size: READ_CAP + 1 } })
-  const rows = await readRows(grown.$, PATH, READ_CAP)
+  const rows = await readRows(engineOf(grown.$), PATH, READ_CAP)
   expect(grown.calls).toEqual([`read ${PATH}`, `stat ${PATH}`, 'spawn tail'])
   expect(rows.map(row => row.uuid)).toEqual([1, 2, 3, 4, 5, 6, 7].map(id))
   const refused = standIn({ starts: () => true, refused: { size: READ_CAP } })
-  expect(await failureOf(readRows(refused.$, PATH, READ_CAP))).toBe('over 4 MiB')
+  expect(await failureOf(readRows(engineOf(refused.$), PATH, READ_CAP))).toBe('over 4 MiB')
   expect(refused.calls).toEqual([`read ${PATH}`, `stat ${PATH}`])
 })
 
@@ -528,13 +531,13 @@ test('a read refused as the file grew past 4 MiB since its size was taken stream
 test('a stream no longer wanted stops at its next piece and ends its command; one read to its end ends as it did', async () => {
   const stopped = standIn({ starts: () => true })
   let wanted = 2
-  expect(await failureOf(readRows(stopped.$, PATH, READ_CAP + 1, () => wanted-- > 0))).toBe('tail stopped: another conversation is on screen')
+  expect(await failureOf(readRows(engineOf(stopped.$), PATH, READ_CAP + 1, () => wanted-- > 0))).toBe('tail stopped: another conversation is on screen')
   expect(stopped.ended).toEqual(['tail cut'])
   const windows = standIn({ starts: () => true })
   let wantedThere = 2
-  expect(await failureOf(readRows(windows.$, WINDOWS_PATH, READ_CAP + 1, () => wantedThere-- > 0))).toBe(`${POWERSHELL} stopped: another conversation is on screen`)
+  expect(await failureOf(readRows(engineOf(windows.$), WINDOWS_PATH, READ_CAP + 1, () => wantedThere-- > 0))).toBe(`${POWERSHELL} stopped: another conversation is on screen`)
   expect(windows.ended).toEqual([`${POWERSHELL} cut`])
   const failing = standIn({ starts: () => true, code: 1 })
-  expect(await failureOf(readRows(failing.$, PATH, READ_CAP + 1))).toBe('tail ended with 1')
+  expect(await failureOf(readRows(engineOf(failing.$), PATH, READ_CAP + 1))).toBe('tail ended with 1')
   expect(failing.ended).toEqual(['tail whole'])
 })

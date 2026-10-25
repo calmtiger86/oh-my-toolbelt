@@ -1,10 +1,13 @@
-// What register.tsx keeps per module load besides `$.state`, and its fixed numbers. Pure: no `$`.
-import type { EngineInterface, PluginOptions, RenderSurface, Timer } from 'claude-code'
+// What register.tsx keeps per module load besides `$.state`, and its fixed numbers. It holds no `$`; the one function
+// here that calls the engine, `withBandColumns`, takes an `Engine`.
+import type { ConfigRow, ConfigSetResult, ConfigValue, EngineInterface, PluginOptions, RenderSurface, SessionMessage, Timer } from 'claude-code'
+import type { ClipBoard, ExportFormat, Note } from '../types/index'
 import { translator, wordLocale } from './lib/i18n'
 import type { ResolvedLanguage } from './lib/i18n'
 import type { StoreRead } from './lib/schema'
 import { cellsOf } from './lib/width'
 import type { Ctx, Snapshot } from './tools/registry'
+import type { ThemeRow } from './tools/theme'
 
 export const PANE_ID = 'oh-my-toolbelt'
 // A /config row of this mod's `userConfig` is named `<plugin>.<field>`.
@@ -67,6 +70,42 @@ export type StoreIo = {
   attempt: <T>(what: string, call: () => Promise<T>, fallback: T) => Promise<T>
 }
 
+// One `$.state` atom as a feature module sees it: Claude Code's loader reads `read` and `update` only with an atom that
+// is a const of the same file, so register.tsx makes each Cell beside its atom.
+export type Cell<T> = { read: () => Promise<T>; update: (change: (value: T) => T) => Promise<T> }
+
+// The engine calls a feature module makes, as register.tsx hands them over (engineOf): the plugin directory lets `$`
+// go only to a function of the same file, so every `$.noun.method(...)` call is written in register.tsx, which
+// declares the hooks.
+export type Engine = {
+  // The `$.state` atoms the feature modules use, each read and changed through the file that defines it (register.tsx).
+  cells: {
+    settings: Cell<ConfigRow[]>
+    settingsSource: Cell<'engine' | 'own'>
+    themeRow: Cell<ThemeRow | null>
+    soundPick: Cell<{ name: string; at: number } | null>
+    bandFolded: Cell<boolean>
+    clipBoard: Cell<ClipBoard>
+    exportFormat: Cell<ExportFormat>
+    notes: Cell<Note[]>
+    curtain: Cell<boolean>
+    tocMoved: Cell<number>
+  }
+  store: Pick<EngineInterface['store'], 'get' | 'set' | 'delete' | 'keys'>
+  env: Pick<EngineInterface['env'], 'get'>
+  ui: Pick<EngineInterface['ui'], 'toast' | 'log' | 'selection' | 'invalidate' | 'scroll' | 'resolve'>
+  clock: Pick<EngineInterface['clock'], 'now' | 'after'>
+  // `messages` and `fs.read` are overloaded in the engine's types; only the plain forms are handed over.
+  session: Pick<EngineInterface['session'], 'surfaces' | 'id' | 'version' | 'cwd'> & { messages: () => Promise<SessionMessage[]> }
+  prompt: Pick<EngineInterface['prompt'], 'fill'>
+  process: Pick<EngineInterface['process'], 'run' | 'spawn'>
+  fs: Pick<EngineInterface['fs'], 'exists' | 'write' | 'stat'> & { read: (path: string) => Promise<string> }
+  command: Pick<EngineInterface['command'], 'list'>
+  audio: Pick<EngineInterface['audio'], 'play'>
+  config: Pick<EngineInterface['config'], 'list'> & { write: (key: string, value: ConfigValue) => Promise<ConfigSetResult> }
+  plugin: { name: string; root: string }
+}
+
 export const initialRuntime = (): Runtime => ({
   options: {}, baseOptions: {}, isActive: false, starting: Promise.resolve(), lang: { lang: 'en', locale: 'en' }, knownCommands: null, isStoreReadOnly: false, ownsAlias: false, timers: [],
   isFetchingWeather: false, hasWeatherToast: false, hasClockNote: false, bandColumns: {}, versions: null,
@@ -74,9 +113,9 @@ export const initialRuntime = (): Runtime => ({
 
 // The band's width on `surface` as just drawn. A new one (a resize, the first band after a reload) draws everything
 // again, so a status tab drawn before the band works its note out from this width, not the last.
-export function withBandColumns($: EngineInterface, known: Runtime['bandColumns'], surface: RenderSurface, columns: number): Runtime['bandColumns'] {
+export function withBandColumns(engine: Engine, known: Runtime['bandColumns'], surface: RenderSurface, columns: number): Runtime['bandColumns'] {
   if (known[surface] === columns) return known
-  $.ui.invalidate('ui.render')
+  engine.ui.invalidate('ui.render')
   return { ...known, [surface]: columns }
 }
 

@@ -27,12 +27,13 @@ hooks/register.tsx ── reads/writes ──▶ $.state  (values a drawing read
 
 | Where | What |
 |---|---|
-| `hooks/register.tsx` | Most hooks (`row-hooks.ts` and `toc-hooks.ts` register the rest), most `$.state` atoms, timers, effects, the band's and the panel's render hooks |
+| `hooks/register.tsx` | Every hook and every `$.state` atom, and every call on `$`: the timers, the effects, the band's and the panel's render hooks. It is the longest file, because the rules below need every engine call written out here |
+| `Engine` (`hooks/runtime.ts`) and `engineOf` (`hooks/register.tsx`) | The boundary between `register.tsx` and the other files. `engineOf($)` builds an `Engine`: the engine calls the other files make (`engine.store.get`, `engine.ui.toast`, …), each written out in `register.tsx` as a plain call on `$`, and a `Cell` (`read`, `update`) for each atom the other files use. Those files take `engine: Engine` and never see `$`; a test hands `engineOf` a stand-in. A call a feature file needs is added to `Engine` and `engineOf`; a new environment variable needs its own case in `envGet`, and a new setting its own case in `writeConfig`, or the call throws |
 | `hooks/band.tsx`, `pane.tsx`, `guide.tsx`, `toc-tab.tsx`, `card.tsx`, `chip.tsx`, `picker.tsx`, `curtain.tsx` | Pure drawing: they take a model and the element table, and call nothing |
-| `hooks/fold.ts`, `clips.ts`, `row-hooks.ts`, `settings.ts`, `own-settings.ts` | Features with their own state, kept out of `register.tsx` |
-| `hooks/config-write.ts` | The one place the mod writes `/config`: a call per row it may change (its own rows and the theme), each key written out |
-| `hooks/toc-live.ts`, `toc-history.ts`, `toc-hooks.ts` | The Prompts tab: rows as they are drawn (and the send button's as they are appended), the transcript file, turns |
-| `hooks/export-run.ts`, `notes-run.ts` | Export and the notes, each with its own `$.state` atom (the export format, the notes); both take `register.tsx`'s store calls as a `StoreIo` (`runtime.ts`), which notes a failure |
+| `hooks/fold.ts`, `clips.ts`, `row-hooks.ts`, `settings.ts`, `own-settings.ts` | Features with their own logic. The atoms of `fold.ts`, `clips.ts`, `row-hooks.ts` and `settings.ts` are in `register.tsx`, reached as `engine.cells`; `row-hooks.ts` holds the bodies of the hooks on the conversation's rows, which `register.tsx` registers |
+| `writeConfig` in `hooks/register.tsx` | The one place the mod writes `/config`: a call per row it may change (its own rows and the theme), each key written out |
+| `hooks/toc-live.ts`, `toc-history.ts`, `toc-hooks.ts` | The Prompts tab: rows as they are drawn (and the send button's as they are appended), the transcript file, turns; `toc-hooks.ts` holds the bodies of the hooks on turns and the transcript, which `register.tsx` registers |
+| `hooks/export-run.ts`, `notes-run.ts` | Export and the notes. Their atoms (the export format, the notes) are in `register.tsx` and reached as `engine.cells`; both take `register.tsx`'s store calls as a `StoreIo` (`runtime.ts`), which notes a failure |
 | `hooks/attach-run.ts`, `pdf-run.ts` | The file picker, PDF printing |
 | `hooks/tools/` | The tools and their pure logic (clock, weather and its cities, pomodoro, notes, buttons, prompts table, transcript parsing, voice, theme, commands) |
 | `hooks/lib/` | Shared pure helpers: effects, fitting, cell widths, i18n, icons, store schema, formatting, Markdown and HTML export, platform paths |
@@ -44,15 +45,13 @@ hooks/register.tsx ── reads/writes ──▶ $.state  (values a drawing read
 
 `claude plugin validate` checks most of these; the rest are conventions that keep the mod working.
 
-- An atom (`atom({ plugin, key })`) is declared in the file that reads and writes it; other files get a function.
-- `$` crosses files only as an argument of a top-level `function`.
-- `register.tsx` stays under validate's 800-line cap, which is why feature modules carry their own state.
+- An atom (`atom({ plugin, key })`) is declared in `register.tsx`, as a const beside the `read` and `update` that use it; a file that needs one gets its `Cell` from `engineOf`.
 - Every hook at a gating site has a `.catch` that answers in its place.
 - Widths are display cells, never string length; wide and emoji characters count two.
 - Keys are letters, never digits; a press reads state at press time, never what a drawing captured.
 - Programs run with an argument list and no shell. The network (weather) and the PDF browser are off until the user turns them on; Attach starts the file picker only when pressed; while the Prompts tab is on, `tail` (PowerShell on Windows) runs by itself to read a transcript file over 4 MiB. macOS's picker and Windows PowerShell run by their full paths (`/usr/bin/osascript`, `%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe`), never by a name the search path could point elsewhere; `tail` runs as `/usr/bin/tail` where that file is there, and by its name only where it is not. [PRIVACY.md](../PRIVACY.md) lists each of them.
 - A `ponytail:` comment marks a deliberate simplification: it names the limit and the way to lift it.
-- In a file that declares hooks, a function written inside another one passes `$` only to a top-level `function` of the same file, and a call that passes `$` carries no type argument. `/config` is written only from `hooks/config-write.ts`, each key written out. The plugin directory's check reads the source as written; validate does not check these.
+- In the file that declares the hooks, `$` and `on` go only to top-level functions of the same file (`read` and `update` from `claude-code` excepted), a call that passes `$` carries no type argument, and each hook is registered by one `on("event", hook)` call on a line of its own; Claude Code's loader takes the atom of `read` and `update` only as a const of the same file, `$.env.get` only with a literal name, and `$.state.get`/`set` only with a literal ref. So every hook, atom and engine call is written in `register.tsx`, and the other files take an `Engine` from `engineOf($)`. `/config` is written only from `writeConfig` in `hooks/register.tsx`, each key written out. The plugin directory's check reads the source as written; validate does not check these.
 
 ## The store
 

@@ -3,15 +3,18 @@
 // Parts ported from oikon48/prompt-rail (MIT): see THIRD_PARTY_NOTICES.md.
 import { expect, test } from 'claude-code/testing'
 import type { EngineInterface } from 'claude-code'
+import { engineOf } from '../hooks/register'
 import { noteJump, notePromptRow, tocTarget, tocView } from '../hooks/toc-live'
 import { tick } from '../hooks/tools/toc'
 
 const timer = { cancel: () => undefined }
-const stand = {
+const stand = engineOf({
+  // engineOf reads the plugin's name and root once.
+  plugin: { name: 'oh-my-toolbelt', root: '/' },
   clock: { after: () => timer },
   ui: { log: () => undefined, invalidate: () => undefined },
   state: { get: async () => ({ value: 0 }), set: async () => undefined },
-} as unknown as EngineInterface
+} as unknown as EngineInterface)
 
 const marks = () => tocView().rows.map(row => tick(row.isCurrent, row.isUnreachable))
 

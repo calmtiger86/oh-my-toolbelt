@@ -1,10 +1,10 @@
 // The prompts tab's live part: the prompts drawn, which one the person reads, each prompt's turn and the rows a jump
-// could not reach. Module state, as register.tsx's `runtime`; a function that calls the engine takes `$` as its
-// argument and keeps none of it (an exception to register.tsx being the one file on `$`).
+// could not reach. Module state, as register.tsx's `runtime`; a function that calls the engine takes `engine`
+// (register.tsx's `engineOf`) as its argument and stores none of it in module state.
 // Parts ported from oikon48/prompt-rail (MIT): see THIRD_PARTY_NOTICES.md.
-import { atom, read, update } from 'claude-code'
-import type { EngineInterface, Timer } from 'claude-code'
+import type { Timer } from 'claude-code'
 import { TOC_REDRAW_MS, errorText } from './runtime'
+import type { Engine } from './runtime'
 import type { TFn } from './lib/i18n'
 import { PROVISIONAL_ID, answerFor, bandCardText, emptyTurn, isTocOrigin, jumpNote, pickIndex, promptIndexOf, promptOf, readIndex, rowKey, toolUse, tocRows, tocScope, withRequestId, withUses } from './tools/toc'
 import type { Answered, BandCard, Opened, PlacedRow, Toc, TocEntry, TocMove, TocView, TocViewOp, Turn } from './tools/toc'
@@ -19,10 +19,6 @@ const SETTLE_MS = 40
 const SETTLE_MAX_MS = 120
 // The rows besides a prompt's own whose place on screen places the person: a reply block, a tool row, a folded group.
 const PLACING: ReadonlySet<string> = new Set(['AssistantMessage', 'ToolUse', 'ToolResult', 'ToolGroup'])
-
-// A count only the prompts tab reads, so bumping it draws the panel again and nothing else: `$.ui.invalidate` would
-// draw every transcript row too, and rows drawn again just after a jump move the viewport.
-const tocMovedState = atom({ plugin: 'oh-my-toolbelt', key: 'tocMoved' } as const, 0)
 
 // Where a row is on screen, as its `onScreen` says; null once it left the viewport.
 type Place = { first: number } | null
@@ -71,35 +67,35 @@ let live = initialLive()
 let timers: { redraw: Timer | null; quiet: Timer | null; latest: Timer | null } = { redraw: null, quiet: null, latest: null }
 
 // ---- Redraws ----
-export function watchToc($: EngineInterface): Promise<number> {
-  return read($, tocMovedState)
+export function watchToc(engine: Engine): Promise<number> {
+  return engine.cells.tocMoved.read()
 }
 
-async function bumpToc($: EngineInterface): Promise<void> {
+async function bumpToc(engine: Engine): Promise<void> {
   try {
-    await update($, tocMovedState, n => n + 1)
+    await engine.cells.tocMoved.update(n => n + 1)
   } catch (err) {
-    $.ui.log(`oh-my-toolbelt: toc redraw failed: ${errorText(err)}`, { to: 'debug' })
+    engine.ui.log(`oh-my-toolbelt: toc redraw failed: ${errorText(err)}`, { to: 'debug' })
   }
 }
 
 // A drawing may not write `$.state`, so a new prompt draws the panel again once the burst of rows is over. Each new
 // prompt moves the timer back, so a refused timer cannot block the next.
-function queueTocRedraw($: EngineInterface): void {
+function queueTocRedraw(engine: Engine): void {
   timers.redraw?.cancel()
-  timers = { ...timers, redraw: $.clock.after(TOC_REDRAW_MS, () => $.ui.invalidate('ui.render')) }
+  timers = { ...timers, redraw: engine.clock.after(TOC_REDRAW_MS, () => engine.ui.invalidate('ui.render')) }
 }
 
 // Draws the panel again once onScreen reports settle, if its drawing no longer shows the prompt being read.
-function redrawSettled($: EngineInterface): void {
+function redrawSettled(engine: Engine): void {
   const fire = () => {
     timers.quiet?.cancel()
     timers.latest?.cancel()
     timers = { ...timers, quiet: null, latest: null }
-    if (currentIndex() !== live.drawnCurrent) void bumpToc($)
+    if (currentIndex() !== live.drawnCurrent) void bumpToc(engine)
   }
   timers.quiet?.cancel()
-  timers = { ...timers, quiet: $.clock.after(SETTLE_MS, fire), latest: timers.latest ?? $.clock.after(SETTLE_MAX_MS, fire) }
+  timers = { ...timers, quiet: engine.clock.after(SETTLE_MS, fire), latest: timers.latest ?? engine.clock.after(SETTLE_MAX_MS, fire) }
 }
 
 // ---- Where the person reads ----
@@ -157,7 +153,7 @@ function dropAbove(cut: Shown): void {
 
 // One onScreen report: where a row is, or that it left. Rows drawn while an agent's transcript is in view are not the
 // main conversation's.
-function seeRow($: EngineInterface, component: string, id: string, place: Place): void {
+function seeRow(engine: Engine, component: string, id: string, place: Place): void {
   if (live.viewAgent !== undefined) return
   const name = `${component}\u0000${id}`
   if (place === null) {
@@ -169,9 +165,9 @@ function seeRow($: EngineInterface, component: string, id: string, place: Place)
     const row = { name, key: rowKey(id), first: place.first, order: live.reports + 1 }
     live = { ...live, reports: row.order, onScreen: new Map([...live.onScreen, [name, row]]) }
     noteLandedRow(row.key)
-    if (row.first > 0) $.clock.after(SETTLE_MS, () => dropAbove(row))
+    if (row.first > 0) engine.clock.after(SETTLE_MS, () => dropAbove(row))
   }
-  redrawSettled($)
+  redrawSettled(engine)
 }
 
 // ---- What the transcript hooks note (register.tsx) ----
@@ -180,7 +176,7 @@ function seeRow($: EngineInterface, component: string, id: string, place: Place)
 // as one (hooks/tools/toc-queue.ts), and where it is on screen. A prompt read from the transcript
 // file jumps to the first id its row is drawn under; a row the file holds as no prompt (bash mode, a slash command)
 // stays out, as the read left it, and so does one the file would hold as none (`promptOf`), before any read.
-export function notePromptRow($: EngineInterface, requestId: string, text: string, place: Place | undefined, now: number): void {
+export function notePromptRow(engine: Engine, requestId: string, text: string, place: Place | undefined, now: number): void {
   const key = rowKey(requestId)
   if (promptOf(text) === undefined || (live.known.has(key) && !live.toc.has(key))) return
   const listed = noteDrawn({ toc: live.toc, queue: live.queue }, requestId, text, now, live.isRunning)
@@ -188,25 +184,25 @@ export function notePromptRow($: EngineInterface, requestId: string, text: strin
   const toc = isFiled ? withRequestId(listed.toc, key, requestId) : listed.toc
   const isChanged = toc !== live.toc
   live = { ...live, toc, queue: listed.queue, filed: isFiled ? new Set([...live.filed].filter(other => other !== key)) : live.filed }
-  if (isChanged) queueTocRedraw($)
-  if (place !== undefined && requestId !== PROVISIONAL_ID) seeRow($, 'UserMessage', requestId, place)
+  if (isChanged) queueTocRedraw(engine)
+  if (place !== undefined && requestId !== PROVISIONAL_ID) seeRow(engine, 'UserMessage', requestId, place)
 }
 
 // A person's prompt was sent (prompt.submit, or session.receive from Remote Control): while a turn runs, its rows drawn
 // before the stored one are one entry. Not a drawing, so the panel is drawn again here when two rows became one.
-export async function notePromptSent($: EngineInterface, text: string, now: number): Promise<void> {
+export async function notePromptSent(engine: Engine, text: string, now: number): Promise<void> {
   const listed = noteSent({ toc: live.toc, queue: live.queue }, text, now, live.isRunning)
   const isChanged = listed.toc !== live.toc
   live = { ...live, ...listed }
-  if (isChanged) await bumpToc($)
+  if (isChanged) await bumpToc(engine)
 }
 
 // A reply or tool row on screen places the person under the prompt it answers. A tool row is drawn under its tool_use
 // id; a folded group counts as its first call.
-export function noteReplyRow($: EngineInterface, component: string, requestId: string, place: Place | undefined, calls?: ReadonlyArray<{ tool_use_id?: string }>): void {
+export function noteReplyRow(engine: Engine, component: string, requestId: string, place: Place | undefined, calls?: ReadonlyArray<{ tool_use_id?: string }>): void {
   if (!PLACING.has(component) || place === undefined) return
   const id = component === 'ToolGroup' ? calls?.find(call => call.tool_use_id !== undefined)?.tool_use_id : requestId
-  if (id !== undefined) seeRow($, component, id, place)
+  if (id !== undefined) seeRow(engine, component, id, place)
 }
 
 // The panel and the band say whose transcript is in view; the rows a switch leaves were another transcript's.
@@ -243,7 +239,7 @@ export function noteAppend(e: Append, own: string): void {
 // one) leaves, and so does a queued prompt one of whose rows the file holds. The file's turns and owners win over what
 // session.append noted since the load, which saw only part.
 // ponytail: the file wins for a turn running while a long file streams; a later read would settle it if that matters.
-export async function noteHistory($: EngineInterface, history: History): Promise<void> {
+export async function noteHistory(engine: Engine, history: History): Promise<void> {
   const prompts = history.prompts.map(prompt => ({ ...prompt, key: rowKey(prompt.uuid) }))
   const held = new Set([...history.known].map(rowKey))
   const known = new Set([...held, ...[...live.queue.aliases].flatMap(([name, key]) => (held.has(name) ? [key] : []))])
@@ -265,21 +261,21 @@ export async function noteHistory($: EngineInterface, history: History): Promise
     turns: new Map([...live.turns, ...prompts.map(({ key }, i): [string, Turn] => [key, history.turns[i] ?? emptyTurn()])]),
     turnKey: live.turnKey ?? prompts[history.started]?.key,
   }
-  await bumpToc($)
+  await bumpToc(engine)
 }
 
-export async function noteTurnStart($: EngineInterface, agentId: string | undefined): Promise<void> {
+export async function noteTurnStart(engine: Engine, agentId: string | undefined): Promise<void> {
   if (agentId !== undefined) return
   // The transcript follows the new turn down from a prompt jumped to. Rows added before it are not a queued prompt's.
   live = { ...live, isRunning: true, landed: undefined, queue: { ...live.queue, lately: [] } }
-  await bumpToc($)
+  await bumpToc(engine)
 }
 
 // A main-loop turn ended: its time adds to its prompt's, and an interruption or an API error says how it went. The
 // next turn's replies belong to no prompt until one starts it, so a turn another plugin's prompt, a command, a
 // scheduled task or a notification started adds nothing to the card before it, as the transcript file reads it
 // (tools/transcript.ts historyOf).
-export async function noteTurnEnd($: EngineInterface, e: { agentId?: string; durationMs: number; reason: string }): Promise<void> {
+export async function noteTurnEnd(engine: Engine, e: { agentId?: string; durationMs: number; reason: string }): Promise<void> {
   if (e.agentId !== undefined) return
   const key = live.turnKey
   const turn = key === undefined ? undefined : (live.turns.get(key) ?? emptyTurn())
@@ -287,31 +283,31 @@ export async function noteTurnEnd($: EngineInterface, e: { agentId?: string; dur
   const ended = turn === undefined ? undefined : { ...turn, durationMs: (turn.durationMs ?? 0) + e.durationMs, ...(outcome === undefined ? {} : { outcome }) }
   const turns = key === undefined || ended === undefined ? live.turns : new Map([...live.turns, [key, ended]])
   live = { ...live, isRunning: false, turns, turnKey: undefined, queue: restQueue(live.queue) }
-  await bumpToc($)
+  await bumpToc(engine)
 }
 
 // ---- Jumps and moves ----
 // After a jump lands, the rows before it left and the prompt jumped to is at the top, though rows may not say so.
-function landOn($: EngineInterface, key: string, requestId: string): void {
+function landOn(engine: Engine, key: string, requestId: string): void {
   const index = promptIndexes().get(key)
   const name = `UserMessage\u0000${requestId}`
   const jump: Landed = { id: live.reports + 1, key, shown: new Set(index === undefined ? [] : [index]), isSettled: false }
   live = { ...live, onScreen: new Map([[name, { name, key, first: 0, order: jump.id }]]), reports: jump.id, reading: key, landed: jump }
-  $.clock.after(SETTLE_MAX_MS, () => {
+  engine.clock.after(SETTLE_MAX_MS, () => {
     if (live.landed?.id === jump.id) live = { ...live, landed: { ...live.landed, isSettled: true } }
   })
 }
 
 // Records what a jump to a prompt answered and returns the language key of what to say, if anything.
-export async function noteJump($: EngineInterface, requestId: string, deny: string | undefined): Promise<string | undefined> {
+export async function noteJump(engine: Engine, requestId: string, deny: string | undefined): Promise<string | undefined> {
   // A queued prompt jumps to its row drawn last, which is another name of its entry.
   const key = keyOf(rowKey(requestId))
   const note = jumpNote(deny, live.isUnscrollableSaid)
   const was = live.unreachable.has(key)
   const unreachable = note.reach === 'yes' ? new Set([...live.unreachable].filter(other => other !== key)) : note.reach === 'no' ? new Set([...live.unreachable, key]) : live.unreachable
   live = { ...live, unreachable, isUnscrollableSaid: live.isUnscrollableSaid || note.isUnscrollable }
-  if (note.reach === 'yes') landOn($, key, requestId)
-  if (unreachable.has(key) !== was || currentIndex() !== live.drawnCurrent) await bumpToc($)
+  if (note.reach === 'yes') landOn(engine, key, requestId)
+  if (unreachable.has(key) !== was || currentIndex() !== live.drawnCurrent) await bumpToc(engine)
   return note.say
 }
 
@@ -327,26 +323,26 @@ export const isViewingAgent = (): boolean => live.viewAgent !== undefined
 
 // The engine moves a transcript row only while the call answers the person's own input, so a press or a typed
 // command reaches this with nothing awaited before it. A failure says so in a toast; a refusal as noteJump reads it.
-export async function scrollToPrompt($: EngineInterface, requestId: string, t: TFn): Promise<void> {
-  const moved = await $.ui.scroll({ to: { requestId }, block: 'start' }).catch((err: unknown) => {
-    $.ui.log(`oh-my-toolbelt: ui.scroll failed (${errorText(err)})`, { to: 'debug' })
+export async function scrollToPrompt(engine: Engine, requestId: string, t: TFn): Promise<void> {
+  const moved = await engine.ui.scroll({ to: { requestId }, block: 'start' }).catch((err: unknown) => {
+    engine.ui.log(`oh-my-toolbelt: ui.scroll failed (${errorText(err)})`, { to: 'debug' })
     return null
   })
-  if (moved === null) return $.ui.toast(t('toast.scrollRejected'))
-  if (moved.deny !== undefined) $.ui.log(`oh-my-toolbelt: ui.scroll refused (${moved.deny})`, { to: 'debug' })
-  const say = await noteJump($, requestId, moved.deny)
-  if (say !== undefined) $.ui.toast(t(say))
+  if (moved === null) return engine.ui.toast(t('toast.scrollRejected'))
+  if (moved.deny !== undefined) engine.ui.log(`oh-my-toolbelt: ui.scroll refused (${moved.deny})`, { to: 'debug' })
+  const say = await noteJump(engine, requestId, moved.deny)
+  if (say !== undefined) engine.ui.toast(t(say))
 }
 
 // `/toolbelt toc next|prev|first|last|<n>|find <words>` answers with a toast, as the person reads far above where a
 // reply row lands. Anyone may ask: the engine moves the transcript only for the person's own input.
-export async function moveToc($: EngineInterface, move: TocMove, t: TFn, isLive: boolean): Promise<{ text?: string }> {
+export async function moveToc(engine: Engine, move: TocMove, t: TFn, isLive: boolean): Promise<{ text?: string }> {
   if (!isLive) return { text: t('command.toc.off') }
   const requestId = isViewingAgent() ? undefined : tocTarget(move)
-  if (requestId !== undefined) return scrollToPrompt($, requestId, t).then(() => ({}))
+  if (requestId !== undefined) return scrollToPrompt(engine, requestId, t).then(() => ({}))
   const asked = move.kind === 'number' ? String(move.n) : move.kind === 'find' ? `find ${move.words}` : move.kind
   const missing = move.kind === 'next' ? t('toast.tocNoNext') : move.kind === 'prev' ? t('toast.tocNoPrev') : t('toast.tocNoMatch', { asked })
-  $.ui.toast(isViewingAgent() ? t('toast.tocMainOnly') : missing)
+  engine.ui.toast(isViewingAgent() ? t('toast.tocMainOnly') : missing)
   return {}
 }
 
@@ -355,52 +351,52 @@ export async function moveToc($: EngineInterface, move: TocMove, t: TFn, isLive:
 // may have grown since, `back` the list again; `fill` puts the prompt, whole, in the prompt box. A press from a row
 // no longer open (drawn before the panel changed) acts on that row alone: `fill` puts its own prompt, the rest pass.
 // A row is its key in the table (an opened row used to close when its id changed).
-export async function viewTocRow($: EngineInterface, op: TocViewOp, key: string, t: TFn): Promise<void> {
+export async function viewTocRow(engine: Engine, op: TocViewOp, key: string, t: TFn): Promise<void> {
   const opened = live.opened?.key === key ? live.opened : null
   if (op === 'fill') {
     const text = opened?.found?.prompt ?? live.toc.get(key)?.text
-    if (text !== undefined && !(await $.prompt.fill({ text, mode: 'insert' })).isFilled) $.ui.toast(t('toast.fillRejected'))
+    if (text !== undefined && !(await engine.prompt.fill({ text, mode: 'insert' })).isFilled) engine.ui.toast(t('toast.fillRejected'))
     return
   }
   if (op !== 'open') {
     if (opened === null) return
     live = { ...live, opened: { ...opened, isFull: op === 'full' } }
-    if (op === 'full') await readOpened($)
-    return bumpToc($)
+    if (op === 'full') await readOpened(engine)
+    return bumpToc(engine)
   }
   live = { ...live, opened: opened === null ? { key, isFull: false } : null }
-  await bumpToc($)
-  await readOpened($)
-  await bumpToc($)
+  await bumpToc(engine)
+  await readOpened(engine)
+  await bumpToc(engine)
 }
 
 // The open row's prompt and answer in the conversation's messages, kept unless another row opened meanwhile.
-async function readOpened($: EngineInterface): Promise<void> {
+async function readOpened(engine: Engine): Promise<void> {
   const key = live.opened?.key
   if (key === undefined) return
-  const found = await findAnswer($, key)
+  const found = await findAnswer(engine, key)
   if (live.opened?.key === key) live = { ...live, opened: { ...live.opened, found } }
 }
 
 // The row's prompt among the messages: the one with its text, as many from the latest as the listed rows after it with
 // the same text, as the messages hold the latest ones only.
-async function findAnswer($: EngineInterface, key: string): Promise<Answered | null> {
+async function findAnswer(engine: Engine, key: string): Promise<Answered | null> {
   const entries = [...live.toc.values()]
   const at = [...live.toc.keys()].indexOf(key)
   const text = entries[at]?.text
   if (text === undefined) return null
   const fromEnd = entries.slice(at + 1).filter(entry => entry.text === text).length
   try {
-    return answerFor(await $.session.messages(), text, fromEnd)
+    return answerFor(await engine.session.messages(), text, fromEnd)
   } catch (err) {
-    $.ui.log(`oh-my-toolbelt: session.messages failed: ${errorText(err)}`, { to: 'debug' })
+    engine.ui.log(`oh-my-toolbelt: session.messages failed: ${errorText(err)}`, { to: 'debug' })
     return null
   }
 }
 
 // The open row's answer, read again, and its number, for an export of it alone (register.tsx).
-export async function openedAnswer($: EngineInterface): Promise<{ answer: string; number: number } | null> {
-  await readOpened($)
+export async function openedAnswer(engine: Engine): Promise<{ answer: string; number: number } | null> {
+  await readOpened(engine)
   const opened = live.opened
   const at = opened === null ? -1 : [...live.toc.keys()].indexOf(opened.key)
   return opened?.found == null || at === -1 ? null : { answer: opened.found.answer, number: at + 1 }
@@ -449,10 +445,10 @@ export function tocBandCards(width: number, t: TFn): BandCard[] {
 }
 
 // Nothing the table holds is in the new, empty conversation; the panel is drawn again once the old rows are gone.
-export function resetToc($: EngineInterface): void {
+export function resetToc(engine: Engine): void {
   timers.quiet?.cancel()
   timers.latest?.cancel()
   timers = { ...timers, quiet: null, latest: null }
   live = initialLive()
-  queueTocRedraw($)
+  queueTocRedraw(engine)
 }

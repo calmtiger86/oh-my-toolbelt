@@ -30,8 +30,8 @@ export function drawTocTab(kit: Kit, model: TocTabModel, ctx: Ctx, act: Act): Re
   const openedRow = view.rows.find(row => row.key === opened?.key)
   if (opened?.isFull === true && openedRow !== undefined) return drawAnswer(kit, openedRow, opened, ctx, act, width)
   const hasCurrent = view.rows.some(row => row.isCurrent)
-  const press = (row: TocRowView) => (on: { surface: RenderSurface }) =>
-    void act(ctx.surface === 'desktop' ? { kind: 'toc.view', op: 'open', key: row.key } : { kind: 'toc.go', requestId: row.requestId }, on.surface)
+  const press = (row: TocRowView) => (pressed: { surface: RenderSurface }) =>
+    void act(ctx.surface === 'desktop' ? { kind: 'toc.view', op: 'open', key: row.key } : { kind: 'toc.go', requestId: row.requestId }, pressed.surface)
   return (
     <Box key="toc" flexDirection="column">
       {view.hidden > 0 ? <Text dimColor>{ctx.t('toc.capped', { n: TOC_ROWS_MAX })}</Text> : null}
@@ -55,11 +55,11 @@ export function drawTocTab(kit: Kit, model: TocTabModel, ctx: Ctx, act: Act): Re
 // What the answer view and the opened row offer: put the prompt in the prompt box, save its answer alone.
 function answerButtons(kit: Kit, row: TocRowView, opened: Opened, ctx: Ctx, act: Act): RenderElement[] {
   const { Button } = kit
-  const on = (op: 'full' | 'fill' | 'export') => (press: { surface: RenderSurface }) => void act({ kind: 'toc.view', op, key: row.key }, press.surface)
+  const pressFor = (op: 'full' | 'fill' | 'export') => (press: { surface: RenderSurface }) => void act({ kind: 'toc.view', op, key: row.key }, press.surface)
   return [
-    ...(opened.isFull || opened.found == null ? [] : [<Button key="toc-full" label={ctx.t('toc.answer.full')} onPress={on('full')} />]),
-    <Button key="toc-fill" label={ctx.t('toc.answer.fill')} onPress={on('fill')} />,
-    ...(opened.found == null ? [] : [<Button key="toc-export" label={ctx.t('toc.answer.export')} onPress={on('export')} />]),
+    ...(opened.isFull || opened.found == null ? [] : [<Button key="toc-full" label={ctx.t('toc.answer.full')} onPress={pressFor('full')} />]),
+    <Button key="toc-fill" label={ctx.t('toc.answer.fill')} onPress={pressFor('fill')} />,
+    ...(opened.found == null ? [] : [<Button key="toc-export" label={ctx.t('toc.answer.export')} onPress={pressFor('export')} />]),
   ]
 }
 

@@ -1,10 +1,9 @@
-// Toolbelt's hooks: every hook, the state they read, the effects they run and the timers; the prompts tab, the rows'
-// hooks, settings, notes and exports keep their `$` functions in toc-live, toc-history, row-hooks, settings,
-// own-settings, notes-run and export-run.
+// Toolbelt's hooks module: it registers every hook, declares every `$.state` atom and writes every call on the engine,
+// because the loader and the plugin directory read those only in this file. The other files are handed `engineOf($)`.
 // Parts ported from oikon48/prompt-rail (MIT): see THIRD_PARTY_NOTICES.md.
 import { atom, read, update } from 'claude-code'
-import type { CommandInfo, CommandRunInput, CommandRunResult, ConfigValue, EngineInterface, HttpResponse, Register, RenderSurface } from 'claude-code'
-import type { ButtonConfig, Layout, PaneTab } from '../types/index'
+import type { CommandInfo, CommandRunInput, CommandRunResult, ConfigSetResult, ConfigValue, EngineInterface, HttpResponse, Register, RenderSurface } from 'claude-code'
+import type { ButtonConfig, ClipBoard, Layout, PaneTab } from '../types/index'
 import { FOLD_ID, UNFOLD_ID, bandModel, drawBand, drawFolded, hidesButtonNames } from './band'
 import { draftIssues, drawPane } from './pane'
 import type { PaneAction } from './pane'
@@ -29,11 +28,11 @@ import type { SetChange } from './tools/user'
 import { asWeatherCache, failedWeather, forecastUrl, isFresh, loadingWeather, newerCache, offWeather, parseForecast, sameTarget, shownWeather, weatherCity, weatherRefreshMs, weatherTarget } from './tools/weather'
 import type { WeatherCache, WeatherLook, WeatherTarget } from './tools/weather'
 import { EXPORT_TOAST_MS, MOVE_SETTINGS_MS, PANE_ID, PANE_ROWS, SYNC_MS, TICK_MS, VOICE_SYNC_MS, errorText, initialRuntime, makeCtx, withBandColumns } from './runtime'
-import type { StoreIo } from './runtime'
+import type { Engine, StoreIo } from './runtime'
 import { moveToc, openedAnswer, noteTocView, resetToc, scrollToPrompt, tocBandCards, tocView, viewTocRow, watchToc } from './toc-live'
 import { fillTranscript, refillTranscript } from './toc-history'
-import { logHookFailure, registerTurns } from './toc-hooks'
-import { changeCurtain, isCurtainOn, registerTranscript } from './row-hooks'
+import { appendRow, completeTurn, logHookFailure, readTranscript, receivePrompt, startTurn } from './toc-hooks'
+import { changeCurtain, drawPromptRow, drawRow, isCurtainOn, submitPrompt } from './row-hooks'
 import { FOLDED_KEY, isBandFolded, loadFold, setBandFolded } from './fold'
 import { clipEffects, deleteClip, isClipsTabOn, noteSelection, readClipBoard, restoreClips } from './clips'
 import { exportOutcome, loadExportFormat, readExportFormat, rememberFormat, toastAndAnswer } from './export-run'
@@ -60,6 +59,22 @@ const iconsState = atom({ plugin: 'oh-my-toolbelt', key: 'icons' } as const, {})
 const iconGroupState = atom({ plugin: 'oh-my-toolbelt', key: 'iconGroup' } as const, DEFAULT_ICON_GROUP)
 const editDraftState = atom({ plugin: 'oh-my-toolbelt', key: 'editDraft' } as const, null)
 const lastErrorState = atom({ plugin: 'oh-my-toolbelt', key: 'lastError' } as const, null)
+const settingsState = atom({ plugin: 'oh-my-toolbelt', key: 'settings' } as const, [])
+// Whose rows the status tab draws: the engine's, or the mod's own from plugin.json.
+const settingsSourceState = atom({ plugin: 'oh-my-toolbelt', key: 'settingsSource' } as const, 'engine')
+// Claude Code's own theme row, for the theme button; read with the mod's rows.
+const themeRowState = atom({ plugin: 'oh-my-toolbelt', key: 'themeRow' } as const, null)
+const soundPickState = atom({ plugin: 'oh-my-toolbelt', key: 'soundPick' } as const, null)
+const bandFoldedState = atom({ plugin: 'oh-my-toolbelt', key: 'bandFolded' } as const, false)
+const EMPTY_CLIP_BOARD: ClipBoard = { clips: [], seen: null, changing: null }
+const clipBoardState = atom({ plugin: 'oh-my-toolbelt', key: 'clipBoard' } as const, EMPTY_CLIP_BOARD)
+// The status tab's choice; the store's `exportLast` is the one the band's button uses next, in every session.
+const exportFormatState = atom({ plugin: 'oh-my-toolbelt', key: 'exportFormat' } as const, 'md')
+const notesState = atom({ plugin: 'oh-my-toolbelt', key: 'notes' } as const, [])
+const curtainState = atom({ plugin: 'oh-my-toolbelt', key: 'curtain' } as const, false)
+// A count only the prompts tab reads, so bumping it draws the panel again and nothing else: `$.ui.invalidate` would
+// draw every transcript row too, and rows drawn again just after a jump move the viewport.
+const tocMovedState = atom({ plugin: 'oh-my-toolbelt', key: 'tocMoved' } as const, 0)
 
 // What this module load knows besides `$.state` (hooks/runtime.ts).
 let runtime = initialRuntime()
@@ -74,16 +89,107 @@ async function noteError($: EngineInterface, key: string, args?: Record<string, 
 }
 
 // Runs one call on `$`; a failure goes to the debug log and lastError, and `fallback` stands in.
-// `call` runs once; a promise already started is waited for the same way. The plugin directory's check follows `$`
-// into another file's function only from a plain call, not from inside a function written in the call, so those
-// callers pass the started promise. Such a callee must be an async function, so that its throw arrives here as a
-// rejection instead of escaping before `attempt` runs.
+// `call` runs once; a promise already started is waited for the same way. That promise must come from an async
+// function, so that a throw arrives here as a rejection instead of escaping before `attempt` runs. `engineOf` does not
+// throw, so building `engineOf($)` for such a call cannot throw before `attempt` runs either.
 async function attempt<T>($: EngineInterface, what: string, call: Promise<T> | (() => Promise<T>), fallback: T): Promise<T> {
   try {
     return await (typeof call === 'function' ? call() : call)
   } catch (err) {
     await noteError($, 'error.call', { call: what, reason: errorText(err) })
     return fallback
+  }
+}
+
+// The environment variables the mod reads, each name written out: the engine's loader reads `$.env.get` only with a literal
+// name, so a module's variables can be listed.
+async function envGet($: EngineInterface, name: string): Promise<string | undefined> {
+  switch (name) {
+    case 'LC_ALL': return $.env.get('LC_ALL')
+    case 'LC_MESSAGES': return $.env.get('LC_MESSAGES')
+    case 'LANG': return $.env.get('LANG')
+    case 'DISPLAY': return $.env.get('DISPLAY')
+    case 'WAYLAND_DISPLAY': return $.env.get('WAYLAND_DISPLAY')
+    case 'OS': return $.env.get('OS')
+    case 'SystemRoot': return $.env.get('SystemRoot')
+    case 'HOME': return $.env.get('HOME')
+    case 'USERPROFILE': return $.env.get('USERPROFILE')
+    case 'ProgramFiles': return $.env.get('ProgramFiles')
+    case 'ProgramFiles(x86)': return $.env.get('ProgramFiles(x86)')
+    case 'LOCALAPPDATA': return $.env.get('LOCALAPPDATA')
+    default: throw new Error(`not a variable this mod reads: ${name}`)
+  }
+}
+
+// The engine calls the feature modules make, each written here as a plain call (runtime.ts `Engine`).
+export function engineOf($: EngineInterface): Engine {
+  return {
+    cells: {
+      settings: { read: () => read($, settingsState), update: change => update($, settingsState, change) },
+      settingsSource: { read: () => read($, settingsSourceState), update: change => update($, settingsSourceState, change) },
+      themeRow: { read: () => read($, themeRowState), update: change => update($, themeRowState, change) },
+      soundPick: { read: () => read($, soundPickState), update: change => update($, soundPickState, change) },
+      bandFolded: { read: () => read($, bandFoldedState), update: change => update($, bandFoldedState, change) },
+      clipBoard: { read: () => read($, clipBoardState), update: change => update($, clipBoardState, change) },
+      exportFormat: { read: () => read($, exportFormatState), update: change => update($, exportFormatState, change) },
+      notes: { read: () => read($, notesState), update: change => update($, notesState, change) },
+      curtain: { read: () => read($, curtainState), update: change => update($, curtainState, change) },
+      tocMoved: { read: () => read($, tocMovedState), update: change => update($, tocMovedState, change) },
+    },
+    store: { get: key => $.store.get(key), set: (key, value) => $.store.set(key, value), delete: key => $.store.delete(key), keys: () => $.store.keys() },
+    env: { get: name => envGet($, name) },
+    ui: {
+      toast: (text, options) => $.ui.toast(text, options),
+      log: (text, options) => $.ui.log(text, options),
+      selection: () => $.ui.selection(),
+      invalidate: event => $.ui.invalidate(event),
+      scroll: args => $.ui.scroll(args),
+      resolve: e => $.ui.resolve(e),
+    },
+    clock: { now: () => $.clock.now(), after: (ms, fn) => $.clock.after(ms, fn) },
+    session: { surfaces: () => $.session.surfaces(), messages: () => $.session.messages(), id: () => $.session.id(), version: () => $.session.version(), cwd: () => $.session.cwd() },
+    prompt: { fill: input => $.prompt.fill(input) },
+    // Runs and writes only what PRIVACY.md lists under "What it runs" and "What it keeps on your computer": the file
+    // picker, the PDF browser, `tail` (PowerShell on Windows) for a long transcript, and the exports.
+    process: { run: (argv, init) => $.process.run(argv, init), spawn: request => $.process.spawn(request) },
+    fs: { exists: path => $.fs.exists(path), write: (path, text) => $.fs.write(path, text), stat: (path, options) => $.fs.stat(path, options), read: path => $.fs.read(path) },
+    command: { list: () => $.command.list() },
+    audio: { play: (clip, options) => $.audio.play(clip, options) },
+    config: { list: () => $.config.list(), write: (key, value) => writeConfig($, key, value) },
+    plugin: { name: $.plugin.name, root: $.plugin.root },
+  }
+}
+
+// The only place the mod writes /config: one plain call per row it may change, the key written out, so a reader (the
+// plugin directory's check among them) sees that it changes its own rows and the theme and nothing else.
+export async function writeConfig($: EngineInterface, key: string, value: ConfigValue): Promise<ConfigSetResult> {
+  switch (key) {
+    case 'oh-my-toolbelt.language': return $.config.set({ key: 'oh-my-toolbelt.language', value: value })
+    case 'oh-my-toolbelt.clockFormat': return $.config.set({ key: 'oh-my-toolbelt.clockFormat', value: value })
+    case 'oh-my-toolbelt.clockSeconds': return $.config.set({ key: 'oh-my-toolbelt.clockSeconds', value: value })
+    case 'oh-my-toolbelt.dateFormat': return $.config.set({ key: 'oh-my-toolbelt.dateFormat', value: value })
+    case 'oh-my-toolbelt.timeZone': return $.config.set({ key: 'oh-my-toolbelt.timeZone', value: value })
+    case 'oh-my-toolbelt.iconStyle': return $.config.set({ key: 'oh-my-toolbelt.iconStyle', value: value })
+    case 'oh-my-toolbelt.weatherPlace': return $.config.set({ key: 'oh-my-toolbelt.weatherPlace', value: value })
+    case 'oh-my-toolbelt.temperatureUnit': return $.config.set({ key: 'oh-my-toolbelt.temperatureUnit', value: value })
+    case 'oh-my-toolbelt.weatherRefreshMinutes': return $.config.set({ key: 'oh-my-toolbelt.weatherRefreshMinutes', value: value })
+    case 'oh-my-toolbelt.pomodoroFocusMinutes': return $.config.set({ key: 'oh-my-toolbelt.pomodoroFocusMinutes', value: value })
+    case 'oh-my-toolbelt.pomodoroBreakMinutes': return $.config.set({ key: 'oh-my-toolbelt.pomodoroBreakMinutes', value: value })
+    case 'oh-my-toolbelt.pomodoroAutoBreak': return $.config.set({ key: 'oh-my-toolbelt.pomodoroAutoBreak', value: value })
+    case 'oh-my-toolbelt.pomodoroNotify': return $.config.set({ key: 'oh-my-toolbelt.pomodoroNotify', value: value })
+    case 'oh-my-toolbelt.pomodoroSound': return $.config.set({ key: 'oh-my-toolbelt.pomodoroSound', value: value })
+    case 'oh-my-toolbelt.pomodoroSoundName': return $.config.set({ key: 'oh-my-toolbelt.pomodoroSoundName', value: value })
+    case 'oh-my-toolbelt.exportDirectory': return $.config.set({ key: 'oh-my-toolbelt.exportDirectory', value: value })
+    case 'oh-my-toolbelt.attachEnabled': return $.config.set({ key: 'oh-my-toolbelt.attachEnabled', value: value })
+    case 'oh-my-toolbelt.voiceMode': return $.config.set({ key: 'oh-my-toolbelt.voiceMode', value: value })
+    case 'oh-my-toolbelt.pdfBrowser': return $.config.set({ key: 'oh-my-toolbelt.pdfBrowser', value: value })
+    case 'oh-my-toolbelt.curtainRestoreOnSubmit': return $.config.set({ key: 'oh-my-toolbelt.curtainRestoreOnSubmit', value: value })
+    case 'oh-my-toolbelt.hotkeysEnabled': return $.config.set({ key: 'oh-my-toolbelt.hotkeysEnabled', value: value })
+    case 'oh-my-toolbelt.tocTab': return $.config.set({ key: 'oh-my-toolbelt.tocTab', value: value })
+    case 'oh-my-toolbelt.clipboardTab': return $.config.set({ key: 'oh-my-toolbelt.clipboardTab', value: value })
+    case 'oh-my-toolbelt.paneOpenOnStart': return $.config.set({ key: 'oh-my-toolbelt.paneOpenOnStart', value: value })
+    case 'theme': return $.config.set({ key: 'theme', value: value })
+    default: throw new Error(`not a setting this mod writes: ${key}`)
   }
 }
 
@@ -128,8 +234,8 @@ async function freshButtons($: EngineInterface): Promise<ButtonConfig | null> {
 // Copies the store into `$.state`: at start, and after /clear, /resume and /branch reset the state.
 async function loadStore($: EngineInterface): Promise<void> {
   // First, so a band drawn after /clear meanwhile is not drawn unfolded.
-  await attempt($, 'store.get bandFolded', loadFold($), undefined)
-  await attempt($, 'clipboard restore', restoreClips($), undefined)
+  await attempt($, 'store.get bandFolded', loadFold(engineOf($)), undefined)
+  await attempt($, 'clipboard restore', restoreClips(engineOf($)), undefined)
   const [version, buttons, layout] = [await storeGet($, 'schemaVersion'), await storeGet($, 'buttons'), await storeGet($, 'layout')]
   const plan = planLoad(version, buttons, layout, defaultButtonConfig(tr()), runtime.isStoreReadOnly)
   const snapshot = plan.snapshot
@@ -145,7 +251,7 @@ async function loadStore($: EngineInterface): Promise<void> {
   await update($, layoutState, () => normalized)
   await update($, pomodoroState, current => mergePomodoro(current, pomodoro))
   await update($, bandHiddenState, () => isHidden)
-  await loadExportFormat($, storeIo($))
+  await loadExportFormat(engineOf($), storeIo($))
   if (icons.isRead) await update($, iconsState, () => asIcons(icons.value))
 }
 
@@ -177,7 +283,7 @@ async function tick($: EngineInterface): Promise<void> {
   if (now === null) return
   await attempt($, 'clock tick', () => refreshClock($, now), undefined)
   await attempt($, 'pomodoro tick', () => refreshPomodoro($, now), undefined)
-  if (runtime.isActive && isClipsTabOn(runtime.options)) await attempt($, 'clipboard tick', noteSelection($, now), undefined)
+  if (runtime.isActive && isClipsTabOn(runtime.options)) await attempt($, 'clipboard tick', noteSelection(engineOf($), now), undefined)
 }
 
 async function syncPomodoro($: EngineInterface): Promise<void> {
@@ -292,10 +398,10 @@ async function listCommands($: EngineInterface): Promise<CommandInfo[] | null> {
 // The status tab's settings (hooks/settings.ts), a failed read keeping the last; kept store changes go to /config.
 // A change /config refused or a locked row holds is named, and the mod runs with /config's value again.
 async function refreshSettings($: EngineInterface): Promise<void> {
-  await attempt($, 'config.list', listSettings($, runtime.options), undefined)
-  const rows = await readSettings($)
-  if (runtime.isStoreReadOnly || rows.length === 0 || (await readSettingsSource($)) !== 'engine') return
-  const result = await attempt($, 'settings move', moveOverrides($, runtime.baseOptions, rows), { refused: [], moved: 0, failed: [] })
+  await attempt($, 'config.list', listSettings(engineOf($), runtime.options), undefined)
+  const rows = await readSettings(engineOf($))
+  if (runtime.isStoreReadOnly || rows.length === 0 || (await readSettingsSource(engineOf($))) !== 'engine') return
+  const result = await attempt($, 'settings move', moveOverrides(engineOf($), runtime.baseOptions, rows), { refused: [], moved: 0, failed: [] })
   // One that failed stays in the store for the next try, and the status tab says why.
   if (result.failed.length > 0) await noteError($, 'error.call', { call: 'settings move', reason: result.failed.join('; ') })
   if (result.refused.length === 0) return
@@ -305,29 +411,29 @@ async function refreshSettings($: EngineInterface): Promise<void> {
 }
 
 async function pickSetting($: EngineInterface, key: string, value: string): Promise<void> {
-  await previewSound($, key, value)
+  await previewSound(engineOf($), key, value)
   let change: SettingChange
   try {
-    change = await changeSetting($, key, value, runtime.options)
+    change = await changeSetting(engineOf($), key, value, runtime.options)
   } catch (err) {
-    await dropSoundPick($)
+    await dropSoundPick(engineOf($))
     throw err
   }
   if (change.kind === 'own') return saveOwnSetting($, change.field, change.value)
   if (change.kind !== 'denied') return
-  await dropSoundPick($)
+  await dropSoundPick(engineOf($))
   return $.ui.toast(tr()('toast.settingRefused', { reason: change.reason }))
 }
 
 // A change to the mod's own rows (hooks/own-settings.ts): kept first, then applied as a load applies one, as no reload
 // follows. A prompts tab turned on reads the conversation again: nothing noted it while the tab was off.
 async function saveOwnSetting($: EngineInterface, field: string, value: ConfigValue): Promise<void> {
-  const saving = runtime.isStoreReadOnly ? null : saveOverride($, runtime.baseOptions, field, value)
+  const saving = runtime.isStoreReadOnly ? null : saveOverride(engineOf($), runtime.baseOptions, field, value)
   const isSaved = saving !== null && (await attempt($, 'settings save', saving.then(() => true), false))
-  if (!isSaved) return void (await dropSoundPick($), $.ui.toast(tr()(runtime.isStoreReadOnly ? 'status.storeNewer' : 'toast.saveFailed')))
+  if (!isSaved) return void (await dropSoundPick(engineOf($)), $.ui.toast(tr()(runtime.isStoreReadOnly ? 'status.storeNewer' : 'toast.saveFailed')))
   const wasToc = isTocLive()
   await applySettings($)
-  if (!wasToc && isTocLive()) await refillTranscript($, !runtime.isStoreReadOnly)
+  if (!wasToc && isTocLive()) await refillTranscript(engineOf($), !runtime.isStoreReadOnly)
   // As a start says it after a /config change.
   if (field === 'timeZone') warnBadTimeZone($)
 }
@@ -360,7 +466,7 @@ async function registerCommands($: EngineInterface): Promise<void> {
 async function reloadSession($: EngineInterface): Promise<void> {
   startTimers($)
   await loadStore($)
-  await syncNotes($, storeIo($))
+  await syncNotes(engineOf($), storeIo($))
   await refreshClock($, await $.clock.now())
   await registerCommands($)
   await attempt($, 'weather load', () => loadWeather($), undefined)
@@ -376,7 +482,7 @@ async function syncVoiceMode($: EngineInterface): Promise<void> {
 
 // A load's work with the settings, done again by a change to the mod's own rows; returns how many store changes stand.
 async function applySettings($: EngineInterface): Promise<number> {
-  const kept = await attempt($, 'settings load', loadOverrides($, runtime.baseOptions), { options: runtime.baseOptions, count: 0 })
+  const kept = await attempt($, 'settings load', loadOverrides(engineOf($), runtime.baseOptions), { options: runtime.baseOptions, count: 0 })
   runtime = { ...runtime, options: kept.options }
   const lang = await resolveLang($)
   runtime = { ...runtime, lang }
@@ -384,7 +490,7 @@ async function applySettings($: EngineInterface): Promise<number> {
   // The band and the panel draw from the options, which no state they read follows (a changed icon style did not show).
   $.ui.invalidate('ui.render')
   // Neither may keep the session from starting.
-  await attempt($, 'sound pick', playPickedSound($), undefined)
+  await attempt($, 'sound pick', playPickedSound(engineOf($)), undefined)
   await attempt($, 'voice sync', () => syncVoiceMode($), undefined)
   return kept.count
 }
@@ -402,11 +508,11 @@ async function startSession($: EngineInterface): Promise<void> {
   if ((await applySettings($)) > 0 && (await $.session.surfaces()).includes('terminal')) $.clock.after(MOVE_SETTINGS_MS, () => void attempt($, 'settings refresh', () => refreshSettings($), undefined))
   warnBadTimeZone($)
   // Not a failure the status tab names: the versions line is left out.
-  const versions = await readVersions($).catch((err: unknown) => ($.ui.log(`oh-my-toolbelt: versions unread: ${errorText(err)}`, { to: 'debug' }), null))
+  const versions = await readVersions(engineOf($)).catch((err: unknown) => ($.ui.log(`oh-my-toolbelt: versions unread: ${errorText(err)}`, { to: 'debug' }), null))
   runtime = { ...runtime, versions }
   if (runtime.options.paneOpenOnStart === true) await openPaneAtStart($)
   // The prompts sent before this load, from the transcript file a SessionStart or the store names.
-  if (isTocTabOn(runtime.options)) await fillTranscript($, !runtime.isStoreReadOnly)
+  if (isTocTabOn(runtime.options)) await fillTranscript(engineOf($), !runtime.isStoreReadOnly)
 }
 
 // ---- Effects: the one place a tool's wish becomes a `$` call ----
@@ -431,7 +537,7 @@ async function togglePane($: EngineInterface, tab: PaneTab): Promise<void> {
 
 // The notes tab shows what the store holds now: another session may have saved a note since this one read them.
 async function showTab($: EngineInterface, tab: PaneTab): Promise<void> {
-  if (tab === 'notes') await syncNotes($, storeIo($))
+  if (tab === 'notes') await syncNotes(engineOf($), storeIo($))
   await update($, openPickerState, () => null)
   await update($, paneTabState, () => tab)
 }
@@ -467,7 +573,7 @@ async function runEffect($: EngineInterface, effect: Effect): Promise<void> {
       // The send button's prompt is the person's words (`asUser`), so curtainRestoreOnSubmit lowers the curtain for it
       // as for one typed. 2.1.310 runs none of this mod's prompt.submit or ui.render hooks on its own submit (only
       // session.append, where the prompts tab lists it), so it is judged here.
-      if (effect.asUser && runtime.options.curtainRestoreOnSubmit === true) await changeCurtain($, () => false)
+      if (effect.asUser && runtime.options.curtainRestoreOnSubmit === true) await changeCurtain(engineOf($), () => false)
       return
     }
     case 'command.run': return void (await runCommand($, effect.command, effect.args))
@@ -481,7 +587,7 @@ async function runEffect($: EngineInterface, effect: Effect): Promise<void> {
     // Only the theme button sets a /config row through an effect.
     case 'config.set': {
       if (effect.key !== 'theme') return noteError($, 'error.effectUnavailable', { effect: `config.set ${effect.key}` })
-      const deny = await setTheme($, String(effect.value))
+      const deny = await setTheme(engineOf($), String(effect.value))
       return deny === undefined ? undefined : $.ui.toast(t('toast.themeRefused', { reason: deny }))
     }
     case 'ui.open': return openPane($, effect.tab)
@@ -495,12 +601,12 @@ async function runEffect($: EngineInterface, effect: Effect): Promise<void> {
     case 'audio.play':
       return $.audio.play({ asset: effect.asset }).catch(() => undefined)
     case 'state.update':
-      if (effect.key === 'curtain') return void (await changeCurtain($, value => effect.fn(value) === true))
+      if (effect.key === 'curtain') return void (await changeCurtain(engineOf($), value => effect.fn(value) === true))
       if (effect.key !== 'pomodoro') return noteError($, 'error.effectUnavailable', { effect: `state.update ${effect.key}` })
       return void (await update($, pomodoroState, value => asPomodoro(effect.fn(value)) ?? value))
     case 'store.set': return void (await storeSet($, effect.key, effect.value))
-    case 'export': return $.ui.toast(await exportOutcome($, storeIo($), exportEnv(), effect.format), { timeoutMs: EXPORT_TOAST_MS })
-    case 'attach': return runAttach($, t)
+    case 'export': return $.ui.toast(await exportOutcome(engineOf($), storeIo($), exportEnv(), effect.format), { timeoutMs: EXPORT_TOAST_MS })
+    case 'attach': return runAttach(engineOf($), t)
     case 'log': return $.ui.log(effect.text, { to: 'debug' })
     // A kind added to Effect without a case fails to compile here, and one that reaches it anyway leaves a line why.
     default: {
@@ -516,8 +622,8 @@ async function runEffects($: EngineInterface, effects: readonly Effect[]): Promi
 
 // ---- Presses and the panel: a press reads state now, never what a drawing captured ----
 async function pressItem($: EngineInterface, id: string, surface: RenderSurface): Promise<void> {
-  if (id === FOLD_ID || id === UNFOLD_ID) return void (await setBandFolded($, id === FOLD_ID), await storeSet($, FOLDED_KEY, id === FOLD_ID))
-  const state = { ...emptySnapshot(), buttons: await read($, buttonsState), layout: await read($, layoutState), pomodoro: await currentPomodoro($), curtain: await isCurtainOn($), themeRow: await readThemeRow($), voice: await read($, voiceState) }
+  if (id === FOLD_ID || id === UNFOLD_ID) return void (await setBandFolded(engineOf($), id === FOLD_ID), await storeSet($, FOLDED_KEY, id === FOLD_ID))
+  const state = { ...emptySnapshot(), buttons: await read($, buttonsState), layout: await read($, layoutState), pomodoro: await currentPomodoro($), curtain: await isCurtainOn(engineOf($)), themeRow: await readThemeRow(engineOf($)), voice: await read($, voiceState) }
   const ctx = makeCtx(runtime, surface, state, await $.clock.now())
   await runEffects($, toolForItem(id, ctx)?.onPress?.(ctx, { surface }) ?? [])
 }
@@ -528,7 +634,7 @@ async function changeLayout($: EngineInterface, surface: RenderSurface, change: 
   const stored = current === null ? null : await freshRead($, 'layout')
   if (current === null || stored === null || !stored.isRead) return false
   const base = normalizeLayout(stored.value === undefined ? await read($, layoutState) : stored.value, { state: { buttons: current } })
-  const shownBy = { themeRow: await readThemeRow($), voice: await read($, voiceState) }
+  const shownBy = { themeRow: await readThemeRow(engineOf($)), voice: await read($, voiceState) }
   const next = change(base, makeCtx(runtime, surface, { ...emptySnapshot(), buttons: current, layout: base, ...shownBy }, await $.clock.now()))
   if (!(await panelSave($, 'layout', next))) return false
   await update($, layoutState, () => next)
@@ -594,14 +700,14 @@ async function runPaneAction($: EngineInterface, action: PaneAction, surface: Re
   switch (action.kind) {
     case 'tab': return showTab($, action.tab)
     case 'press': return pressItem($, action.id, surface)
-    case 'toc.go': return scrollToPrompt($, action.requestId, tr())
-    case 'toc.view': return action.op === 'export' ? exportAnswer($) : viewTocRow($, action.op, action.key, tr())
-    case 'note.add': return addQuickNote($, storeIo($), action.text, tr())
-    case 'note.fill': return runEffects($, await noteFillEffects($, action.id))
-    case 'note.delete': return deleteQuickNote($, storeIo($), action.id)
-    case 'clip.fill': return runEffects($, await clipEffects($, action.id, tr()('toast.clipGone')))
-    case 'clip.delete': return deleteClip($, action.id)
-    case 'export.format': return rememberFormat($, storeIo($), action.format)
+    case 'toc.go': return scrollToPrompt(engineOf($), action.requestId, tr())
+    case 'toc.view': return action.op === 'export' ? exportAnswer($) : viewTocRow(engineOf($), action.op, action.key, tr())
+    case 'note.add': return addQuickNote(engineOf($), storeIo($), action.text, tr())
+    case 'note.fill': return runEffects($, await noteFillEffects(engineOf($), action.id))
+    case 'note.delete': return deleteQuickNote(engineOf($), storeIo($), action.id)
+    case 'clip.fill': return runEffects($, await clipEffects(engineOf($), action.id, tr()('toast.clipGone')))
+    case 'clip.delete': return deleteClip(engineOf($), action.id)
+    case 'export.format': return rememberFormat(engineOf($), storeIo($), action.format)
     case 'layout':
       return void (await changeLayout($, surface, (layout, ctx) => applyLayoutOp(layout, action.op, action.id, id => isItemShown(id, ctx))))
     case 'layout.reset':
@@ -637,25 +743,25 @@ const isTocLive = (): boolean => runtime.isActive && isTocTabOn(runtime.options)
 const exportEnv = (): ExportEnv => ({ t: tr(), lang: runtime.lang.lang, clock: clockFormatOptions(runtime.options, runtime.lang.locale), exportDirectory: runtime.options.exportDirectory, pdfBrowser: runtime.options.pdfBrowser })
 
 async function exportAnswer($: EngineInterface): Promise<void> {
-  const only = await openedAnswer($)
-  if (only !== null) $.ui.toast(await exportOutcome($, storeIo($), exportEnv(), undefined, only), { timeoutMs: EXPORT_TOAST_MS })
+  const only = await openedAnswer(engineOf($))
+  if (only !== null) $.ui.toast(await exportOutcome(engineOf($), storeIo($), exportEnv(), undefined, only), { timeoutMs: EXPORT_TOAST_MS })
 }
 
 // ---- /toolbelt and /tb ----
 async function runToolbelt($: EngineInterface, e: CommandRunInput): Promise<CommandRunResult> {
   const t = tr()
   const command = parseCommand(e.args)
-  if (command.op === 'toc') return moveToc($, command.move, tr(), isTocLive())
+  if (command.op === 'toc') return moveToc(engineOf($), command.move, tr(), isTocLive())
   if (command.op === 'open') await openPane($, command.tab)
   const isPersonOnly = command.op === 'band' || command.op === 'curtain' || command.op === 'export'
   if (isPersonOnly && !isHumanOrigin(e.origin)) return { text: `${t('command.error.humanOnly')} ${t('command.usage')}` }
-  if (command.op === 'export') return toastAndAnswer($, await exportOutcome($, storeIo($), exportEnv(), command.format))
+  if (command.op === 'export') return toastAndAnswer(engineOf($), await exportOutcome(engineOf($), storeIo($), exportEnv(), command.format))
   if (command.op === 'band') {
     await update($, bandHiddenState, () => command.isHidden)
     await storeSet($, 'bandHidden', command.isHidden)
   }
   // The curtain flips through the band button's effects; asked for the state it is in, it changes and toasts nothing.
-  if (command.op === 'curtain' && command.isOn !== (await isCurtainOn($))) await runEffects($, curtainEffects(command.isOn, t))
+  if (command.op === 'curtain' && command.isOn !== (await isCurtainOn(engineOf($)))) await runEffects($, curtainEffects(command.isOn, t))
   if (command.op === 'pomodoro') await changePomodoro($, command.verb)
   if (command.op === 'weather') {
     if (weatherCity(runtime.options) === null) return { text: t('command.weather.off') }
@@ -669,27 +775,27 @@ async function runToolbelt($: EngineInterface, e: CommandRunInput): Promise<Comm
 async function bandCtx($: EngineInterface, surface: RenderSurface): Promise<Ctx> {
   const [clockLabel, pomodoro] = [await read($, clockLabelState), await read($, pomodoroState)]
   const [weather, buttons, layout] = [await read($, weatherState), await read($, buttonsState), await read($, layoutState)]
-  const [curtain, icons, themeRow, voice] = [await isCurtainOn($), await read($, iconsState), await readThemeRow($), await read($, voiceState)]
+  const [curtain, icons, themeRow, voice] = [await isCurtainOn(engineOf($)), await read($, iconsState), await readThemeRow(engineOf($)), await read($, voiceState)]
   // The band carries the prompts' cards, so it draws again as the prompts tab does.
-  if (isTocTabOn(runtime.options)) await watchToc($)
+  if (isTocTabOn(runtime.options)) await watchToc(engineOf($))
   return makeCtx(runtime, surface, { ...emptySnapshot(), clockLabel, pomodoro, weather, buttons, layout, curtain, icons, themeRow, voice }, await $.clock.now())
 }
 
 async function paneCtx($: EngineInterface, surface: RenderSurface): Promise<Ctx> {
   const paneTab = await read($, paneTabState)
   // The prompts tab draws again as where the person reads or a turn changes (toc-live's count).
-  if (paneTab === 'toc') await watchToc($)
+  if (paneTab === 'toc') await watchToc(engineOf($))
   // Only the status tab draws the clock, the weather, the timer, the curtain button and the export format, and only
   // the notes tab the notes, so each redraws only as its own values change.
   const live = paneTab === 'status'
-    ? { clockLabel: await read($, clockLabelState), weather: await read($, weatherState), pomodoro: await read($, pomodoroState), curtain: await isCurtainOn($), exportFormat: await readExportFormat($) }
-    : paneTab === 'notes' ? { notes: await readNotes($) }
-    : paneTab === 'clips' ? { clipBoard: await readClipBoard($) }
+    ? { clockLabel: await read($, clockLabelState), weather: await read($, weatherState), pomodoro: await read($, pomodoroState), curtain: await isCurtainOn(engineOf($)), exportFormat: await readExportFormat(engineOf($)) }
+    : paneTab === 'notes' ? { notes: await readNotes(engineOf($)) }
+    : paneTab === 'clips' ? { clipBoard: await readClipBoard(engineOf($)) }
     : paneTab === 'guide' ? { guideSection: await read($, guideSectionState) } : {}
   const [buttons, layout] = [await read($, buttonsState), await read($, layoutState)]
   const [editDraft, lastError] = [await read($, editDraftState), await read($, lastErrorState)]
   // Whether the theme and voice buttons exist: the status tab lists them and the tools tab lays them out.
-  const [themeRow, voice] = [await readThemeRow($), await read($, voiceState)]
+  const [themeRow, voice] = [await readThemeRow(engineOf($)), await read($, voiceState)]
   const [icons, iconGroup, openPicker] = [await read($, iconsState), await read($, iconGroupState), await read($, openPickerState)]
   return makeCtx(runtime, surface, { ...emptySnapshot(), ...live, paneTab, buttons, layout, icons, iconGroup, openPicker, editDraft, lastError, themeRow, voice }, await $.clock.now())
 }
@@ -703,7 +809,7 @@ export const register: Register = (on, options) => {
     runtime = { ...runtime, starting }
     await starting
     return next(e)
-  }).catch(($, e, next) => (logHookFailure($, 'session.start', next.error), next(e)))
+  }).catch(($, e, next) => (logHookFailure(engineOf($), 'session.start', next.error), next(e)))
 
   // The desktop app hosts its Code tab's sessions through the SDK, so they start with isInteractive false and no
   // surface (d.ts SessionStartInput); a person is there once a surface attaches (without this, /toolbelt was missing in
@@ -716,30 +822,30 @@ export const register: Register = (on, options) => {
       await startSession($)
     }
     return next(e)
-  }).catch(($, e, next) => (logHookFailure($, 'session.attach', next.error), next(e)))
+  }).catch(($, e, next) => (logHookFailure(engineOf($), 'session.attach', next.error), next(e)))
 
   // /clear, /resume and /branch reset `$.state` without a new session.start.
   on('classic.SessionStart', { source: ['clear', 'resume', 'fork'] }, async ($, e, next) => {
     // Nothing the table holds is in the new, empty conversation. The panel is drawn again after the usual wait,
     // when the old rows are gone and cannot be noted again.
-    if (e.source === 'clear') resetToc($)
+    if (e.source === 'clear') resetToc(engineOf($))
     // These empty `$.state`, and the panel is not opened by itself after them, nor after a reload that follows.
     await update($, paneStartedState, () => true)
     if (runtime.isActive) await reloadSession($)
     return next(e)
-  }).catch(($, e, next) => (logHookFailure($, 'classic.SessionStart', next.error), next(e)))
+  }).catch(($, e, next) => (logHookFailure(engineOf($), 'classic.SessionStart', next.error), next(e)))
 
   // This `.catch` must not read `next`, or validate no longer sees a hook that answers its own command.
-  on('command.run', { command: ['toolbelt', 'tb'] }, ($, e) => runToolbelt($, e)).catch($ => (logHookFailure($, 'command.run'), { text: tr()('command.failed') }))
+  on('command.run', { command: ['toolbelt', 'tb'] }, ($, e) => runToolbelt($, e)).catch($ => (logHookFailure(engineOf($), 'command.run'), { text: tr()('command.failed') }))
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const props = e.props
     noteTocView(props.view.agentId)
     // Read before the guards: a band drawn before session.start draws again when loadStore writes it.
     if ((await read($, bandHiddenState)) || !runtime.isActive || props.hasSurvey || props.view.agentId !== undefined || props.maxRows < 1) return next(e)
-    runtime = { ...runtime, bandColumns: withBandColumns($, runtime.bandColumns, e.surface, props.bodyColumns) }
+    runtime = { ...runtime, bandColumns: withBandColumns(engineOf($), runtime.bandColumns, e.surface, props.bodyColumns) }
     // Folded, it reads nothing it does not draw, so the clock's tick leaves it be.
-    const isFolded = await isBandFolded($)
+    const isFolded = await isBandFolded(engineOf($))
     const model = isFolded ? null : bandModel(await bandCtx($, e.surface), props.bodyColumns, runtime.knownCommands)
     if (model === null && !isFolded) return next(e)
     // Another mod's band goes below ours, one row shorter; if it fails, ours draws alone.
@@ -747,7 +853,7 @@ export const register: Register = (on, options) => {
     const press = (id: string, surface: RenderSurface) => attempt($, `press ${id}`, () => pressItem($, id, surface), undefined)
     if (model === null) return drawFolded($.ui.resolve(e), press, other)
     return drawBand($.ui.resolve(e), model, press, other, tocBandCards(props.bodyColumns, tr()), props.bodyColumns)
-  }).catch(($, e, next) => (logHookFailure($, 'ui.render AbovePrompt', next.error), next(e)))
+  }).catch(($, e, next) => (logHookFailure(engineOf($), 'ui.render AbovePrompt', next.error), next(e)))
 
   on('ui.render', { component: 'Pane', requestId: 'oh-my-toolbelt' }, async ($, e, next) => {
     // Read before the guard, as the band does: a panel kept open over a reload draws again.
@@ -759,17 +865,27 @@ export const register: Register = (on, options) => {
     const isStatus = ctx.state.paneTab === 'status'
     const model = {
       ctx, language: `${runtime.lang.lang} (${runtime.lang.locale})`, versions: runtime.versions, knownCommands: runtime.knownCommands,
-      settings: isStatus ? await readSettings($) : [], settingsSource: await readSettingsSource($),
+      settings: isStatus ? await readSettings(engineOf($)) : [], settingsSource: await readSettingsSource(engineOf($)),
       canSelect: e.surface === 'desktop' || (e.surface === 'terminal' && e.viewport?.isFullscreen === true),
-      isBandShort: isStatus && !(await read($, bandHiddenState)) && !(await isBandFolded($)) && hidesButtonNames(ctx, runtime.bandColumns[e.surface], runtime.knownCommands),
+      isBandShort: isStatus && !(await read($, bandHiddenState)) && !(await isBandFolded(engineOf($))) && hidesButtonNames(ctx, runtime.bandColumns[e.surface], runtime.knownCommands),
       toc, columns: e.props.bodyColumns, clock: clockFormatOptions(runtime.options, runtime.lang.locale),
     }
     const act = (action: PaneAction, surface: RenderSurface) => attempt($, `panel ${action.kind}`, () => runPaneAction($, action, surface), undefined)
     return drawPane($.ui.resolve(e), model, act)
-  }).catch(($, e, next) => (logHookFailure($, 'ui.render Pane', next.error), next(e)))
+  }).catch(($, e, next) => (logHookFailure(engineOf($), 'ui.render Pane', next.error), next(e)))
 
-  // Registered whatever the settings say, and asked at each event: a change to the mod's own rows comes without a reload.
-  registerTranscript(on, () => ({ isTocLive: isTocLive(), restoresCurtain: runtime.options.curtainRestoreOnSubmit === true }))
-  registerTurns(on, () => ({ isActive: isTocLive(), isStoreReadOnly: runtime.isStoreReadOnly }))
+  // The rows', the turns' and the transcript's hooks (hooks/row-hooks.ts, hooks/toc-hooks.ts): registered whatever the
+  // settings say, and asked at each event, so a change to the mod's own rows comes without a reload.
+  const rowsLive = () => ({ isTocLive: isTocLive(), restoresCurtain: runtime.options.curtainRestoreOnSubmit === true })
+  const turnsLive = () => ({ isActive: isTocLive(), isStoreReadOnly: runtime.isStoreReadOnly })
+  on('ui.render', { component: 'UserMessage' }, async ($, e, next) => drawPromptRow(engineOf($), e, next, rowsLive)).catch(($, e, next) => (logHookFailure(engineOf($), 'ui.render UserMessage', next.error), next(e)))
+  on('ui.render', { component: ['AssistantMessage', 'ToolUse', 'ToolResult', 'ToolGroup', 'CommandOutput', 'TurnDuration', 'InfoNotice', 'ToolProgress'] }, async ($, e, next) => drawRow(engineOf($), e, next, rowsLive)).catch(($, e, next) => (logHookFailure(engineOf($), 'ui.render curtain', next.error), next(e)))
+  on('prompt.submit', async ($, e, next) => submitPrompt(engineOf($), e, next, rowsLive)).catch(($, e, next) => (logHookFailure(engineOf($), 'prompt.submit', next.error), next(e)))
+  // This SessionStart runs after the clear/resume/fork one above, so the session is loaded again (or /clear has emptied the table) first.
+  on('classic.SessionStart', async ($, e, next) => readTranscript(engineOf($), e, next, turnsLive)).catch(($, e, next) => (logHookFailure(engineOf($), 'classic.SessionStart transcript', next.error), next(e)))
+  on('session.receive', async ($, e, next) => receivePrompt(engineOf($), e, next, turnsLive)).catch(($, e, next) => (logHookFailure(engineOf($), 'session.receive', next.error), next(e)))
+  on('session.append', { door: ['prompt', 'response'] }, async ($, e, next) => appendRow(engineOf($), e, next, turnsLive)).catch(($, e, next) => (logHookFailure(engineOf($), 'session.append', next.error), next(e)))
+  on('turn.start', async ($, e, next) => startTurn(engineOf($), e, next, turnsLive)).catch(($, e, next) => (logHookFailure(engineOf($), 'turn.start', next.error), next(e)))
+  on('turn.complete', async ($, e, next) => completeTurn(engineOf($), e, next, turnsLive)).catch(($, e, next) => (logHookFailure(engineOf($), 'turn.complete', next.error), next(e)))
 }
 

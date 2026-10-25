@@ -4,17 +4,14 @@
 // desktop app answers it too. On the main screen the terminal app selects and nothing reaches the mod. Kept for this
 // session only (`$.state`, and a copy here for /clear), never written to a file.
 // ponytail: Copy on select turned off still collects selections, as a mod cannot read that global setting
-import { atom, read, update } from 'claude-code'
-import type { EngineInterface } from 'claude-code'
 import type { ClipBoard } from '../types/index'
 import type { Effect } from './lib/effects'
+import type { Engine } from './runtime'
 
 export const CLIPS_MAX = 30
 // A longer selection is skipped rather than kept in part: an insert must put back what was copied.
 export const CLIP_CHARS_MAX = 20_000
 
-const EMPTY: ClipBoard = { clips: [], seen: null, changing: null }
-const clipBoardState = atom({ plugin: 'oh-my-toolbelt', key: 'clipBoard' } as const, EMPTY)
 // /clear, /resume and /branch empty `$.state`, a reload empties this; each puts the other back.
 let kept: ClipBoard | undefined
 // A failing read is logged once, not each second, until a read works again.
@@ -42,19 +39,19 @@ export function withReading(board: ClipBoard, text: string | undefined, id: stri
   return { clips: [clip, ...rest].slice(0, CLIPS_MAX), seen, changing: clip.id }
 }
 
-async function change($: EngineInterface, next: (board: ClipBoard) => ClipBoard): Promise<void> {
-  await update($, clipBoardState, board => (kept = next(board)))
+async function change(engine: Engine, next: (board: ClipBoard) => ClipBoard): Promise<void> {
+  await engine.cells.clipBoard.update(board => (kept = next(board)))
 }
 
-export function readClipBoard($: EngineInterface): Promise<ClipBoard> {
-  return read($, clipBoardState)
+export function readClipBoard(engine: Engine): Promise<ClipBoard> {
+  return engine.cells.clipBoard.read()
 }
 
 // Each second while the tab is on. A board the reading leaves as it was is not written, so the tab is not redrawn.
-export async function noteSelection($: EngineInterface, now: number): Promise<void> {
+export async function noteSelection(engine: Engine, now: number): Promise<void> {
   let text: string | undefined
   try {
-    text = (await $.ui.selection())?.text
+    text = (await engine.ui.selection())?.text
     hasFailed = false
   } catch (err) {
     if (hasFailed) return
@@ -62,27 +59,27 @@ export async function noteSelection($: EngineInterface, now: number): Promise<vo
     throw err
   }
   const id = `c${now}`
-  const board = await read($, clipBoardState)
-  if (withReading(board, text, id) !== board) await change($, current => withReading(current, text, id))
+  const board = await engine.cells.clipBoard.read()
+  if (withReading(board, text, id) !== board) await change(engine, current => withReading(current, text, id))
 }
 
 // At each load of the store. After /clear, /resume or /branch emptied the state: the list as it was, the selection
 // forgotten. After a reload: the state's list, kept here for the next /clear.
-export async function restoreClips($: EngineInterface): Promise<void> {
-  const board = await read($, clipBoardState)
+export async function restoreClips(engine: Engine): Promise<void> {
+  const board = await engine.cells.clipBoard.read()
   const list = kept
   if (board.clips.length > 0) kept = board
-  else if (list !== undefined && list.clips.length > 0) await change($, () => ({ clips: list.clips, seen: null, changing: null }))
+  else if (list !== undefined && list.clips.length > 0) await change(engine, () => ({ clips: list.clips, seen: null, changing: null }))
 }
 
 // Insert puts the clip at the prompt's cursor, whole; one gone since the tab was drawn (deleted, or moved up under a
 // new id) says so.
-export async function clipEffects($: EngineInterface, id: string, goneText: string): Promise<Effect[]> {
-  const clip = (await read($, clipBoardState)).clips.find(c => c.id === id)
+export async function clipEffects(engine: Engine, id: string, goneText: string): Promise<Effect[]> {
+  const clip = (await engine.cells.clipBoard.read()).clips.find(c => c.id === id)
   return clip === undefined ? [{ kind: 'ui.toast', text: goneText }] : [{ kind: 'prompt.fill', text: clip.text, mode: 'insert' }]
 }
 
 // The selection that made it stays `seen`, so it does not come back.
-export async function deleteClip($: EngineInterface, id: string): Promise<void> {
-  await change($, board => ({ ...board, clips: board.clips.filter(c => c.id !== id), changing: board.changing === id ? null : board.changing }))
+export async function deleteClip(engine: Engine, id: string): Promise<void> {
+  await change(engine, board => ({ ...board, clips: board.clips.filter(c => c.id !== id), changing: board.changing === id ? null : board.changing }))
 }
