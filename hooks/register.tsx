@@ -41,6 +41,7 @@ import type { ExportEnv } from './export-run'
 import { addQuickNote, deleteQuickNote, noteFillEffects, readNotes, syncNotes } from './notes-run'
 import { runAttach } from './attach-run'
 import { changeSetting, dropSoundPick, listSettings, playPickedSound, previewSound, readSettings, readSettingsSource, readThemeRow, setTheme } from './settings'
+import type { SettingChange } from './settings'
 import { loadOverrides, moveOverrides, readVersions, saveOverride } from './own-settings'
 import { voiceModeOf, voiceModeToSync } from './tools/voice'
 
@@ -73,9 +74,13 @@ async function noteError($: EngineInterface, key: string, args?: Record<string, 
 }
 
 // Runs one call on `$`; a failure goes to the debug log and lastError, and `fallback` stands in.
-async function attempt<T>($: EngineInterface, what: string, call: () => Promise<T>, fallback: T): Promise<T> {
+// `call` runs once; a promise already started is waited for the same way. The plugin directory's check follows `$`
+// into another file's function only from a plain call, not from inside a function written in the call, so those
+// callers pass the started promise. Such a callee must be an async function, so that its throw arrives here as a
+// rejection instead of escaping before `attempt` runs.
+async function attempt<T>($: EngineInterface, what: string, call: Promise<T> | (() => Promise<T>), fallback: T): Promise<T> {
   try {
-    return await call()
+    return await (typeof call === 'function' ? call() : call)
   } catch (err) {
     await noteError($, 'error.call', { call: what, reason: errorText(err) })
     return fallback
@@ -84,7 +89,7 @@ async function attempt<T>($: EngineInterface, what: string, call: () => Promise<
 
 // A failed read comes back `isRead: false`, never as "unset".
 function storeGet($: EngineInterface, key: string): Promise<StoreRead> {
-  return attempt<StoreRead>($, `store.get ${key}`, async () => ({ isRead: true, value: await $.store.get(key) }), { isRead: false, value: undefined })
+  return attempt($, `store.get ${key}`, async (): Promise<StoreRead> => ({ isRead: true, value: await $.store.get(key) }), { isRead: false, value: undefined })
 }
 
 // True once written. A read-only store writes nothing; a refused write says so.
@@ -123,8 +128,8 @@ async function freshButtons($: EngineInterface): Promise<ButtonConfig | null> {
 // Copies the store into `$.state`: at start, and after /clear, /resume and /branch reset the state.
 async function loadStore($: EngineInterface): Promise<void> {
   // First, so a band drawn after /clear meanwhile is not drawn unfolded.
-  await attempt($, 'store.get bandFolded', () => loadFold($), undefined)
-  await attempt($, 'clipboard restore', () => restoreClips($), undefined)
+  await attempt($, 'store.get bandFolded', loadFold($), undefined)
+  await attempt($, 'clipboard restore', restoreClips($), undefined)
   const [version, buttons, layout] = [await storeGet($, 'schemaVersion'), await storeGet($, 'buttons'), await storeGet($, 'layout')]
   const plan = planLoad(version, buttons, layout, defaultButtonConfig(tr()), runtime.isStoreReadOnly)
   const snapshot = plan.snapshot
@@ -172,7 +177,7 @@ async function tick($: EngineInterface): Promise<void> {
   if (now === null) return
   await attempt($, 'clock tick', () => refreshClock($, now), undefined)
   await attempt($, 'pomodoro tick', () => refreshPomodoro($, now), undefined)
-  if (runtime.isActive && isClipsTabOn(runtime.options)) await attempt($, 'clipboard tick', () => noteSelection($, now), undefined)
+  if (runtime.isActive && isClipsTabOn(runtime.options)) await attempt($, 'clipboard tick', noteSelection($, now), undefined)
 }
 
 async function syncPomodoro($: EngineInterface): Promise<void> {
@@ -210,7 +215,7 @@ const weatherLook = (): WeatherLook => ({ t: tr(), locale: runtime.lang.locale, 
 
 // The one request this mod makes: the coordinates and the unit, nothing the person wrote.
 function fetchWeather($: EngineInterface, target: WeatherTarget): Promise<HttpResponse | null> {
-  return attempt<HttpResponse | null>($, 'http.fetch', () => $.http.fetch(forecastUrl(target), { headers: { Accept: 'application/json' } }), null)
+  return attempt($, 'http.fetch', (): Promise<HttpResponse | null> => $.http.fetch(forecastUrl(target), { headers: { Accept: 'application/json' } }), null)
 }
 
 // `☁ --` for a failed ask, and a toast once per load; the next period asks again.
@@ -278,7 +283,7 @@ async function resolveLang($: EngineInterface): Promise<ResolvedLanguage> {
 }
 
 async function listCommands($: EngineInterface): Promise<CommandInfo[] | null> {
-  const list = await attempt<CommandInfo[] | null>($, 'command.list', () => $.command.list(), null)
+  const list = await attempt($, 'command.list', (): Promise<CommandInfo[] | null> => $.command.list(), null)
   if (list !== null) runtime = { ...runtime, knownCommands: list.map(command => command.name) }
   if (list !== null) await update($, voiceState, voice => ({ ...voice, isAvailable: list.some(command => command.name === 'voice') }))
   return list
@@ -287,10 +292,10 @@ async function listCommands($: EngineInterface): Promise<CommandInfo[] | null> {
 // The status tab's settings (hooks/settings.ts), a failed read keeping the last; kept store changes go to /config.
 // A change /config refused or a locked row holds is named, and the mod runs with /config's value again.
 async function refreshSettings($: EngineInterface): Promise<void> {
-  await attempt($, 'config.list', () => listSettings($, runtime.options), undefined)
+  await attempt($, 'config.list', listSettings($, runtime.options), undefined)
   const rows = await readSettings($)
   if (runtime.isStoreReadOnly || rows.length === 0 || (await readSettingsSource($)) !== 'engine') return
-  const result = await attempt($, 'settings move', () => moveOverrides($, runtime.baseOptions, rows), { refused: [], moved: 0, failed: [] })
+  const result = await attempt($, 'settings move', moveOverrides($, runtime.baseOptions, rows), { refused: [], moved: 0, failed: [] })
   // One that failed stays in the store for the next try, and the status tab says why.
   if (result.failed.length > 0) await noteError($, 'error.call', { call: 'settings move', reason: result.failed.join('; ') })
   if (result.refused.length === 0) return
@@ -301,10 +306,13 @@ async function refreshSettings($: EngineInterface): Promise<void> {
 
 async function pickSetting($: EngineInterface, key: string, value: string): Promise<void> {
   await previewSound($, key, value)
-  const change = await changeSetting($, key, value, runtime.options).catch(async (err: unknown) => {
+  let change: SettingChange
+  try {
+    change = await changeSetting($, key, value, runtime.options)
+  } catch (err) {
     await dropSoundPick($)
     throw err
-  })
+  }
   if (change.kind === 'own') return saveOwnSetting($, change.field, change.value)
   if (change.kind !== 'denied') return
   await dropSoundPick($)
@@ -314,7 +322,8 @@ async function pickSetting($: EngineInterface, key: string, value: string): Prom
 // A change to the mod's own rows (hooks/own-settings.ts): kept first, then applied as a load applies one, as no reload
 // follows. A prompts tab turned on reads the conversation again: nothing noted it while the tab was off.
 async function saveOwnSetting($: EngineInterface, field: string, value: ConfigValue): Promise<void> {
-  const isSaved = !runtime.isStoreReadOnly && (await attempt($, 'settings save', () => saveOverride($, runtime.baseOptions, field, value).then(() => true), false))
+  const saving = runtime.isStoreReadOnly ? null : saveOverride($, runtime.baseOptions, field, value)
+  const isSaved = saving !== null && (await attempt($, 'settings save', saving.then(() => true), false))
   if (!isSaved) return void (await dropSoundPick($), $.ui.toast(tr()(runtime.isStoreReadOnly ? 'status.storeNewer' : 'toast.saveFailed')))
   const wasToc = isTocLive()
   await applySettings($)
@@ -367,7 +376,7 @@ async function syncVoiceMode($: EngineInterface): Promise<void> {
 
 // A load's work with the settings, done again by a change to the mod's own rows; returns how many store changes stand.
 async function applySettings($: EngineInterface): Promise<number> {
-  const kept = await attempt($, 'settings load', () => loadOverrides($, runtime.baseOptions), { options: runtime.baseOptions, count: 0 })
+  const kept = await attempt($, 'settings load', loadOverrides($, runtime.baseOptions), { options: runtime.baseOptions, count: 0 })
   runtime = { ...runtime, options: kept.options }
   const lang = await resolveLang($)
   runtime = { ...runtime, lang }
@@ -375,7 +384,7 @@ async function applySettings($: EngineInterface): Promise<number> {
   // The band and the panel draw from the options, which no state they read follows (a changed icon style did not show).
   $.ui.invalidate('ui.render')
   // Neither may keep the session from starting.
-  await attempt($, 'sound pick', () => playPickedSound($), undefined)
+  await attempt($, 'sound pick', playPickedSound($), undefined)
   await attempt($, 'voice sync', () => syncVoiceMode($), undefined)
   return kept.count
 }

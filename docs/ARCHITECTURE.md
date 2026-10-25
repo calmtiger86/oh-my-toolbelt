@@ -30,6 +30,7 @@ hooks/register.tsx ── reads/writes ──▶ $.state  (values a drawing read
 | `hooks/register.tsx` | Most hooks (`row-hooks.ts` and `toc-hooks.ts` register the rest), most `$.state` atoms, timers, effects, the band's and the panel's render hooks |
 | `hooks/band.tsx`, `pane.tsx`, `guide.tsx`, `toc-tab.tsx`, `card.tsx`, `chip.tsx`, `picker.tsx`, `curtain.tsx` | Pure drawing: they take a model and the element table, and call nothing |
 | `hooks/fold.ts`, `clips.ts`, `row-hooks.ts`, `settings.ts`, `own-settings.ts` | Features with their own state, kept out of `register.tsx` |
+| `hooks/config-write.ts` | The one place the mod writes `/config`: a call per row it may change (its own rows and the theme), each key written out |
 | `hooks/toc-live.ts`, `toc-history.ts`, `toc-hooks.ts` | The Prompts tab: rows as they are drawn (and the send button's as they are appended), the transcript file, turns |
 | `hooks/export-run.ts`, `notes-run.ts` | Export and the notes, each with its own `$.state` atom (the export format, the notes); both take `register.tsx`'s store calls as a `StoreIo` (`runtime.ts`), which notes a failure |
 | `hooks/attach-run.ts`, `pdf-run.ts` | The file picker, PDF printing |
@@ -51,6 +52,7 @@ hooks/register.tsx ── reads/writes ──▶ $.state  (values a drawing read
 - Keys are letters, never digits; a press reads state at press time, never what a drawing captured.
 - Programs run with an argument list and no shell. The network (weather) and the PDF browser are off until the user turns them on; Attach starts the file picker only when pressed; while the Prompts tab is on, `tail` (PowerShell on Windows) runs by itself to read a transcript file over 4 MiB. macOS's picker and Windows PowerShell run by their full paths (`/usr/bin/osascript`, `%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe`), never by a name the search path could point elsewhere; `tail` runs as `/usr/bin/tail` where that file is there, and by its name only where it is not. [PRIVACY.md](../PRIVACY.md) lists each of them.
 - A `ponytail:` comment marks a deliberate simplification: it names the limit and the way to lift it.
+- In a file that declares hooks, a function written inside another one passes `$` only to a top-level `function` of the same file, and a call that passes `$` carries no type argument. `/config` is written only from `hooks/config-write.ts`, each key written out. The plugin directory's check reads the source as written; validate does not check these.
 
 ## The store
 

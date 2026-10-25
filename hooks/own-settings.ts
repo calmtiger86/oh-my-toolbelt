@@ -6,6 +6,7 @@
 // each kept change to /config and drops it. A /config change made after one wins: each keeps the value it replaced.
 // ponytail: a desktop session cannot see a row an organization locks; the terminal drops such a change and names it
 import type { ConfigRow, ConfigValue, EngineInterface, PluginOptions } from 'claude-code'
+import { writeConfig } from './config-write'
 import { CONFIG_PREFIX } from './runtime'
 import type { Versions } from './runtime'
 
@@ -110,7 +111,8 @@ export async function moveOverrides($: EngineInterface, options: PluginOptions, 
       continue
     }
     try {
-      if ((await $.config.set({ key: row.key, value: change.value })).deny !== undefined) refused.push(row.label)
+      const result = await writeConfig($, row.key, change.value)
+      if (result.deny !== undefined) refused.push(row.label)
       else moved += 1
     } catch (err) {
       await $.store.set(key, change)

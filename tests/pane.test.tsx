@@ -350,6 +350,29 @@ test('where the engine lists no rows the status tab draws them from plugin.json;
   await pane.unmount()
 })
 
+test('with a store a newer version wrote, a change to the mod\'s own rows keeps nothing and says why', { options: TEST_OPTIONS }, async ($, on) => {
+  serveManifest(on)
+  const { store, calls } = await boot($, on, { isInteractive: false, store: { schemaVersion: 99 } })
+  const pane = await desktopStatus($)
+  await pane.press(SECONDS)
+  expect(overridesOf(store)).toEqual({})
+  expect(calls.toasts.at(-1)).toBe('Your settings were saved by a newer version of Oh My Toolbelt, so changes made here are not saved.')
+  await pane.unmount()
+})
+
+test('a change to the mod\'s own rows that the store fails to keep says so and keeps nothing', { options: TEST_OPTIONS }, async ($, on) => {
+  serveManifest(on)
+  const failSet = { on: false }
+  const { store, calls } = await boot($, on, { isInteractive: false, failSet })
+  const pane = await desktopStatus($)
+  failSet.on = true
+  await pane.press(SECONDS)
+  expect(overridesOf(store)).toEqual({})
+  expect(calls.toasts.at(-1)).toBe('Could not save your settings.')
+  expect(calls.logged.some(line => line.startsWith('oh-my-toolbelt: settings save failed: '))).toBe(true)
+  await pane.unmount()
+})
+
 // Regression: the icon style changed in the desktop app's status tab did not show; the band draws from the options,
 // which no state it reads follows, so a change draws everything again.
 test('a change to the mod\'s own rows draws the band and the panel again at once', { options: TEST_OPTIONS }, async ($, on) => {
@@ -556,6 +579,21 @@ test('a refused alert sound pick is dropped', { options: TEST_OPTIONS }, async (
   const pane = await mountPane($, 'terminal')
   await pick(pane, 'setting-oh-my-toolbelt.pomodoroSoundName', 'marimba')
   expect(calls.toasts.at(-1)).toContain('managed by policy')
+  await $.session.start({ cwd: '/work', surface: 'terminal', isInteractive: true })
+  expect(calls.played).toEqual([])
+  await pane.unmount()
+})
+
+test('an alert sound pick whose /config call fails is dropped', { options: TEST_OPTIONS }, async ($, on) => {
+  const sound = { key: 'oh-my-toolbelt.pomodoroSoundName', label: 'Pomodoro alert sound', kind: 'choice', value: 'bell', options: ['bell', 'marimba'], provider: { plugin: 'oh-my-toolbelt', tier: 'user' }, isLocked: false }
+  on('config.set', () => {
+    throw new Error('engine busy')
+  })
+  const { calls } = await boot($, on, { settings: [sound] as never })
+  await runCommand($, 'toolbelt', 'status')
+  const pane = await mountPane($, 'terminal')
+  await pick(pane, 'setting-oh-my-toolbelt.pomodoroSoundName', 'marimba')
+  expect(calls.logged.some(line => line.startsWith('oh-my-toolbelt: panel setting.set failed: '))).toBe(true)
   await $.session.start({ cwd: '/work', surface: 'terminal', isInteractive: true })
   expect(calls.played).toEqual([])
   await pane.unmount()

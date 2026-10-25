@@ -3,7 +3,8 @@
 // setting reloads the module, which reads them again. Where the engine lists none of them (the desktop app), the rows
 // come from plugin.json and a change is the store's (hooks/own-settings.ts).
 import { atom, read, update } from 'claude-code'
-import type { ConfigRow, ConfigValue, EngineInterface, PluginOptions } from 'claude-code'
+import type { ConfigRow, ConfigSetResult, ConfigValue, EngineInterface, PluginOptions } from 'claude-code'
+import { writeConfig } from './config-write'
 import { manifestRows, readManifest } from './own-settings'
 import { CONFIG_PREFIX } from './runtime'
 import { POMODORO_SOUNDS, soundAssetOf } from './tools/pomodoro'
@@ -54,7 +55,12 @@ export function readSettingsSource($: EngineInterface): Promise<'engine' | 'own'
 // row holds the new value at once.
 // ponytail: a theme changed in /config shows on the button at the next start or panel opening; a config.set watcher would show it at once
 export async function setTheme($: EngineInterface, value: string): Promise<string | undefined> {
-  const result = await $.config.set({ key: 'theme', value }).catch((err: unknown) => ({ deny: err instanceof Error ? err.message : String(err) }))
+  let result: ConfigSetResult
+  try {
+    result = await writeConfig($, 'theme', value)
+  } catch (err) {
+    result = { deny: err instanceof Error ? err.message : String(err) }
+  }
   if (result.deny !== undefined) {
     themeTold = { isRefused: true, sent: undefined }
     await update($, themeRowState, () => null)
@@ -80,7 +86,7 @@ export async function changeSetting($: EngineInterface, key: string, raw: string
   const value = row === undefined || row.isLocked ? null : settingValue(row, raw)
   if (row === undefined || value === null || value === row.value) return { kind: 'none' }
   if ((await read($, settingsSourceState)) === 'own') return { kind: 'own', field: key.slice(CONFIG_PREFIX.length), value }
-  const result = await $.config.set({ key, value })
+  const result = await writeConfig($, key, value)
   if (result.deny !== undefined) return { kind: 'denied', reason: result.deny }
   await listSettings($, options)
   return { kind: 'done' }
