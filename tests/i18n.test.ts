@@ -1,5 +1,5 @@
 import { test, expect } from 'claude-code/testing'
-import { LANGS, directionOf, resolveLanguage, t, translator, wordLocale } from '../hooks/lib/i18n'
+import { LANGS, directionOf, resolveLanguage, t, translator } from '../hooks/lib/i18n'
 import { en } from '../hooks/locales/en'
 import { ja } from '../hooks/locales/ja'
 import { ko } from '../hooks/locales/ko'
@@ -68,8 +68,8 @@ test('translator gives the t function that Ctx carries', () => {
 })
 
 test('language: a supported setting wins over everything', () => {
-  expect(resolveLanguage('ja', ['ko_KR.UTF-8'], 'en-US')).toEqual({ lang: 'ja', locale: 'ko-KR' })
-  expect(resolveLanguage('en', [undefined, undefined, 'ko_KR.UTF-8'], 'ko-KR').lang).toBe('en')
+  expect(resolveLanguage('ja', ['ko_KR.UTF-8'], 'en-US')).toEqual({ lang: 'ja', locale: 'ja' })
+  expect(resolveLanguage('en', [undefined, undefined, 'ko_KR.UTF-8'], 'ko-KR')).toEqual({ lang: 'en', locale: 'en' })
 })
 
 test('language: auto reads LC_ALL, then LC_MESSAGES, then LANG (the order the caller passes)', () => {
@@ -112,12 +112,18 @@ test('every weather icon word is one word, in every language', () => {
   }
 })
 
-// The weekday's language: the picked language over a computer's other one; with none picked, the computer's own locale,
-// even one the toolbelt has no words for.
-test('words take the picked language only when it differs from the computer\'s', () => {
-  expect(wordLocale({ lang: 'ko', locale: 'en-US' }, 'ko')).toBe('ko')
-  expect(wordLocale({ lang: 'en', locale: 'en-GB' }, 'en')).toBe('en-GB')
-  expect(wordLocale({ lang: 'en', locale: 'de-DE' }, 'auto')).toBe('de-DE')
-  expect(wordLocale({ lang: 'ja', locale: 'ja-JP' }, 'auto')).toBe('ja-JP')
-  expect(wordLocale({ lang: 'en', locale: 'de-DE' }, 'fr')).toBe('de-DE')
+// The locale for dates, times and weekdays: the picked language over a computer's other one; with none picked, or
+// English picked on a computer in a language the toolbelt has no words for, the computer's own locale.
+test('dates and times take the picked language only when it differs from the computer\'s', () => {
+  expect(resolveLanguage('ko', ['en_US.UTF-8'])).toEqual({ lang: 'ko', locale: 'ko' })
+  expect(resolveLanguage('en', ['en_GB.UTF-8'])).toEqual({ lang: 'en', locale: 'en-GB' })
+  expect(resolveLanguage('ja', [], 'ja-JP')).toEqual({ lang: 'ja', locale: 'ja-JP' })
+  expect(resolveLanguage('en', [])).toEqual({ lang: 'en', locale: 'en' })
+  expect(resolveLanguage('auto', ['de_DE.UTF-8'])).toEqual({ lang: 'en', locale: 'de-DE' })
+  expect(resolveLanguage('auto', ['ja_JP.UTF-8'])).toEqual({ lang: 'ja', locale: 'ja-JP' })
+  expect(resolveLanguage('fr', ['de_DE.UTF-8'])).toEqual({ lang: 'en', locale: 'de-DE' })
+  // English picked on a German computer keeps the German day-month order; Korean picked there is Korean.
+  expect(resolveLanguage('en', ['de_DE.UTF-8'])).toEqual({ lang: 'en', locale: 'de-DE' })
+  expect(resolveLanguage('ko', ['de_DE.UTF-8'])).toEqual({ lang: 'ko', locale: 'ko' })
+  expect(resolveLanguage('en', ['ja_JP.UTF-8'])).toEqual({ lang: 'en', locale: 'en' })
 })

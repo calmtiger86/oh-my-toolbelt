@@ -7,7 +7,7 @@
 import type { HookStream, ProcessSpawnChunk, ProcessSpawnResult } from 'claude-code'
 import { errorText } from './runtime'
 import type { Engine } from './runtime'
-import { noteHistory, resetToc } from './toc-live'
+import { noteHistory, resetToc, restoreTurn } from './toc-live'
 import { READ_CAP, TAIL_PATH, feedLines, historyOf, isWindowsPath, lastRows, rowsOf, startFeed, streamRequest } from './tools/transcript'
 import type { Row } from './tools/transcript'
 
@@ -169,8 +169,10 @@ export async function refillTranscript(engine: Engine, canWrite: boolean): Promi
   await fillTranscript(engine, canWrite)
 }
 
-// session.start: at a launch the SessionStart before it named the file; after a reload the store does.
+// session.start: at a launch the SessionStart before it named the file; after a reload the store does. A turn running
+// across the reload is learned first.
 export async function fillTranscript(engine: Engine, canWrite: boolean): Promise<void> {
+  await restoreTurn(engine).catch(err => logFailure(engine, 'turn read', err))
   try {
     const at = named ?? (await rememberedTranscript(engine))
     if (at === undefined) return

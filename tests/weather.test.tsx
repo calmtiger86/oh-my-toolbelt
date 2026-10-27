@@ -1,8 +1,8 @@
 // The weather tile: the forecast is asked for with the city's coordinates, kept in the store, drawn in the band, asked
 // for again on a timer and by /toolbelt weather refresh, and a failure reads `☁ --` with one toast.
-import { expect, test } from 'claude-code/testing'
+import { expect } from 'claude-code/testing'
 import type { HttpInit, On } from 'claude-code'
-import { NOW, SLOW_MS, TEST_OPTIONS, boot, isManifestPath, mountBand, mountPane, pick, runCommand } from './helpers'
+import { NOW, SLOW_MS, TEST_OPTIONS, boot, isManifestPath, mountBand, mountPane, pick, runCommand, test } from './helpers'
 
 const MINUTE = 60_000
 const SEOUL = { ...TEST_OPTIONS, weatherPlace: 'Seoul', temperatureUnit: 'celsius' } as const

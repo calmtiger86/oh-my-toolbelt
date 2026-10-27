@@ -4,7 +4,7 @@
 // (`promptText`).
 // Parts ported from oikon48/prompt-rail (MIT): see THIRD_PARTY_NOTICES.md.
 import { powershellPath } from '../lib/platform'
-import { emptyTurn, promptOf, toolUse, withUses } from './toc'
+import { commandOf, emptyTurn, promptOf, toolUse, withUses } from './toc'
 import type { Turn, Use } from './toc'
 
 // What one `$.fs.read` takes (4 MiB); a larger file is streamed through a command.
@@ -15,17 +15,21 @@ export const LINE_CHARS_MAX = 8 * 1024 * 1024
 
 // The viewer's state the engine puts ahead of a prompt sent while an artifact is open; the typed text follows it.
 const VIEW_CONTEXT = /^\s*<artifact-view-context artifact="[^"]*">\n\{"context":[\s\S]*?\n<\/artifact-view-context>/
-// The notice the engine stores as a user row when the person interrupts a turn.
-const INTERRUPTED = /^\[Request interrupted by user/
+// The notice the engine stores as a user row when the person interrupts a turn (`for tool use` while a tool runs), as
+// 2.1.310 words it. Only the whole row is it: the person can start a message with the same words (lib/export.ts reads
+// the notice so too).
+const INTERRUPTED = /^\[Request interrupted by user(?: for tool use)?\]$/
 
-// A row by what the table makes of it, with its link to the row before it on its branch. A prompt a plugin sent names
-// the plugin (`plugin`), which historyOf weighs.
+// A row by what the table makes of it, with its link to the row before it on its branch and when it was written (`at`,
+// epoch ms, none for a missing or unreadable timestamp). A prompt a plugin sent names the plugin (`plugin`), which
+// historyOf weighs; a user row a machine sent (`start`: a notification, a scheduled task, a peer's message) lists no
+// prompt but starts a turn.
 type Kind =
   | { kind: 'prompt' | 'queued'; text: string; plugin?: string }
   | { kind: 'reply'; uses: readonly Use[]; isError: boolean }
   | { kind: 'duration'; ms: number }
-  | { kind: 'interrupt' | 'boundary' | 'other' }
-export type Row = { uuid: string; parent: string | undefined; isSidechain: boolean } & Kind
+  | { kind: 'interrupt' | 'boundary' | 'start' | 'other' }
+export type Row = { uuid: string; parent: string | undefined; isSidechain: boolean; at?: number } & Kind
 
 // The prompts in order, by row uuid; the turn each started; the prompt (an index) each reply row and tool call
 // answers; every row uuid the file holds; and the prompt whose turn the last replies belong to (-1 for none).
@@ -57,8 +61,8 @@ const MACHINE_KINDS: ReadonlySet<string> = new Set([
 ])
 const isPersonOrigin = (origin: unknown): boolean => !(isRecord(origin) && typeof origin.kind === 'string' && MACHINE_KINDS.has(origin.kind))
 // The plugin that sent a prompt, by name alone, as drawn rows are (tools/toc.ts isTocRow). 2.1.310 stores the send
-// button's `asUser`, but files of earlier builds keep none; a command a plugin ran is its wrapper and caveat rows, which
-// are no prompt anyway.
+// button's `asUser`, but files of earlier builds keep none; a command this mod's button ran is listed as one typed is
+// (userKind).
 const pluginOf = (origin: unknown): { plugin?: string } =>
   isRecord(origin) && origin.kind === 'plugin' ? { plugin: typeof origin.name === 'string' ? origin.name : '' } : {}
 
@@ -68,7 +72,13 @@ function userKind(row: Record<string, unknown>, message: Record<string, unknown>
   // An interruption ends its turn; one mid tool call rides with the call's result, so it is read first.
   if (INTERRUPTED.test(text)) return { kind: 'interrupt' }
   if (Array.isArray(message.content) && message.content.some(b => isRecord(b) && b.type === 'tool_result')) return OTHER
-  const prompt = isPersonOrigin(row.origin) ? promptOf(text) : undefined
+  if (!isPersonOrigin(row.origin)) return { kind: 'start' }
+  // A slash command's own row is a prompt when Claude answers it: the engine stamps where it stands among the turns
+  // (`turnPosition`) on that row, and on none of a command that only acts here (`/model`, `/reload-plugins`), in the
+  // transcript files sampled (2.1.284 to 2.1.310).
+  // ponytail: files of builds that stamp no turnPosition keep their commands out; list a command a reply follows if
+  // those matter
+  const prompt = promptOf(text) ?? (isRecord(row.turnPosition) ? commandOf(text) : undefined)
   return prompt === undefined ? OTHER : { kind: 'prompt', text: prompt, ...pluginOf(row.origin) }
 }
 
@@ -106,7 +116,8 @@ export function parseRow(line: string): Row | undefined {
   }
   if (!isRecord(row) || typeof row.uuid !== 'string') return undefined
   const parent = typeof row.parentUuid === 'string' ? row.parentUuid : undefined
-  return { uuid: row.uuid, parent, isSidechain: row.isSidechain === true, ...kindOf(row) }
+  const at = typeof row.timestamp === 'string' ? Date.parse(row.timestamp) : NaN
+  return { uuid: row.uuid, parent, isSidechain: row.isSidechain === true, ...(Number.isFinite(at) ? { at } : {}), ...kindOf(row) }
 }
 
 // ---- Lines as they come: the whole file at once, or a command's output piece by piece ----
@@ -161,33 +172,42 @@ function liveBranch(rows: readonly Row[]): ReadonlySet<string> {
 // queued into a turn leaves the turn's details with the one that started it. A subagent's rows are passed over, and so
 // is a prompt another plugin sent; one this mod (`own`) sent came from its send button, as the person's. A turn ends
 // at its turn_duration row, which nearly every turn writes, or at its interruption or API error reply: such a turn
-// may write none (seen in 2.1.295 to 2.1.308), and one it writes right after is still that turn's. So the next turn
-// adds to no listed prompt unless one starts it: another plugin's prompt, a command, bash mode's answer, a scheduled
-// task or a notification lists none.
+// may write none (seen in 2.1.295 to 2.1.308; 2.1.310 writes none for a turn the person stops), and one it writes
+// right after is still that turn's, as is a second interruption or API error reply there. The engine's rows between
+// (informational ones, a /compact boundary) leave the turn open; a machine's row, which starts the next turn, does
+// not. A turn so ended with no turn_duration row takes its time from the rows' timestamps, from its prompt to the
+// first row that ended it (14.06 s where the engine counted 13.92 s, 2.1.310). So the next turn adds to no listed
+// prompt unless one starts it: another plugin's prompt or command, bash mode's answer, a scheduled task or a
+// notification lists none.
 export function historyOf(rows: readonly Row[], own: string): History {
   const live = liveBranch(rows)
   const seen = new Set<string>()
   const prompts: { uuid: string; text: string }[] = []
   const turns: Turn[] = []
   const owners: [string, number][] = []
+  // By turn: when its prompt was written, and when the first interruption or API error that ended it was.
+  const startsAt: (number | undefined)[] = []
+  const endsAt: (number | undefined)[] = []
   let started = -1
   // The turn an interruption or an API error just ended, until its turn_duration row or a row of the next turn.
   let ending = -1
   for (const row of rows) {
     if (row.isSidechain || !live.has(row.uuid) || seen.has(row.uuid)) continue
     seen.add(row.uuid)
-    if (row.kind === 'duration' && ending !== -1) started = ending
+    if ((row.kind === 'duration' || row.kind === 'interrupt' || (row.kind === 'reply' && row.isError)) && ending !== -1) started = ending
     if (row.kind !== 'other' && row.kind !== 'boundary') ending = -1
     const turn = turns[started]
     if ((row.kind === 'prompt' || row.kind === 'queued') && (row.plugin === undefined || row.plugin === own)) {
       prompts.push({ uuid: row.uuid, text: row.text })
       turns.push(emptyTurn())
+      startsAt.push(row.kind === 'prompt' ? row.at : undefined)
       if (row.kind === 'prompt') started = prompts.length - 1
     } else if (turn !== undefined && row.kind === 'reply') {
       const owner = prompts.length - 1
       owners.push([row.uuid, owner], ...row.uses.map((use): [string, number] => [use.id, owner]))
       turns[started] = { ...withUses(turn, row.uses), ...(row.isError ? { outcome: 'error' as const } : {}) }
       if (row.isError) {
+        endsAt[started] = endsAt[started] ?? row.at
         ending = started
         started = -1
       }
@@ -196,11 +216,18 @@ export function historyOf(rows: readonly Row[], own: string): History {
       started = -1
     } else if (turn !== undefined && row.kind === 'interrupt') {
       turns[started] = { ...turn, outcome: 'interrupted' }
+      endsAt[started] = endsAt[started] ?? row.at
       ending = started
       started = -1
     }
   }
-  return { prompts, turns, owners, known: new Set(rows.map(row => row.uuid)), started }
+  // Only once every row is read: a turn_duration row may still follow the row that ended its turn (2.1.308), and its
+  // time is the engine's own.
+  const timed = turns.map((turn, i) => {
+    const [from, to] = [startsAt[i], endsAt[i]]
+    return turn.durationMs === undefined && from !== undefined && to !== undefined && to >= from ? { ...turn, durationMs: to - from } : turn
+  })
+  return { prompts, turns: timed, owners, known: new Set(rows.map(row => row.uuid)), started }
 }
 
 // ---- Streaming a file over READ_CAP ----

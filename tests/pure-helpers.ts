@@ -45,6 +45,7 @@ export function makeState(over: Partial<Snapshot> = {}): Snapshot {
     paneTab: 'tools',
     paneStarted: false,
     tocMoved: 0,
+    turnRunning: false,
     guideSection: 'start',
     buttons,
     layout: defaultLayout(buttons),

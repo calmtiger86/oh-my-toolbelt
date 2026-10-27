@@ -4,9 +4,9 @@
 import type { Hook, MatchedHook } from 'claude-code'
 import { drawCurtain } from './curtain'
 import type { Engine } from './runtime'
-import { notePromptRow, notePromptSent, noteReplyRow } from './toc-live'
+import { noteCommandSent, notePromptRow, notePromptSent, noteReplyRow } from './toc-live'
 import { isHumanOrigin } from './tools/command'
-import { isTocKind, isTocRow } from './tools/toc'
+import { isOwn, isTocKind, isTocRow } from './tools/toc'
 
 export function isCurtainOn(engine: Engine): Promise<boolean> {
   return engine.cells.curtain.read()
@@ -46,10 +46,13 @@ export async function drawRow(engine: Engine, e: Parameters<RowHook>[1], next: P
 
 // With curtainRestoreOnSubmit the person's own prompt lowers the curtain; only a prompt the person sent counts, so a
 // background task or another plugin cannot lift it. The prompts tab notes a prompt the person sent, as one sent while
-// a turn runs is drawn under ids the engine never stores. With neither it passes the prompt on. 2.1.310 runs none of
-// this mod's prompt.submit for its own submit, so the send button's prompt is judged where register.tsx sends it.
+// a turn runs is drawn under ids the engine never stores, and a slash command the person or this mod's button ran, as
+// its own row comes next (toc-live.ts noteCommandSent). Either way it passes the prompt on. 2.1.310 runs none of this
+// mod's prompt.submit for its own submit, so the send button's prompt is judged where register.tsx sends it; a command
+// this mod runs comes here.
 export async function submitPrompt(engine: Engine, e: Parameters<SubmitHook>[1], next: Parameters<SubmitHook>[2], live: Live): Promise<Awaited<ReturnType<SubmitHook>>> {
   if (live().restoresCurtain && isHumanOrigin(e.origin) && (await isCurtainOn(engine))) await changeCurtain(engine, () => false)
   if (live().isTocLive && isTocKind(e.origin.kind) && e.command === undefined && e.isMeta !== true) await notePromptSent(engine, e.text, await engine.clock.now())
+  if (live().isTocLive && (isTocKind(e.origin.kind) || isOwn(e.origin, engine.plugin.name)) && e.command !== undefined && e.isMeta !== true) noteCommandSent(e.command.name)
   return next(e)
 }

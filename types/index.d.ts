@@ -58,6 +58,9 @@ declare module 'claude-code' {
       paneStarted: boolean
       // Bumped when the prompts tab should draw again: where the person reads or a turn changed.
       tocMoved: number
+      // Whether the main loop's turn runs, from turn.start to turn.complete. Kept here, as a reload in the middle of a
+      // turn (new options, a changed file) starts the module over while the turn goes on.
+      turnRunning: boolean
       guideSection: GuideSection
       buttons: ButtonConfig
       layout: Layout

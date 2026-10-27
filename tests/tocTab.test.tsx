@@ -1,10 +1,10 @@
 // The contents tab: prompts the person sent are noted as their rows are drawn, listed in the panel, and a press asks
 // the engine to bring one into view.
-import { expect, test } from 'claude-code/testing'
+import { expect } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { PromptOrigin } from 'claude-code'
 import { cellsOf } from '../hooks/lib/width'
-import { PLUGIN, SLOW_MS, SURFACES, TEST_OPTIONS, boot, hostless, mountPane, runCommand } from './helpers'
+import { PLUGIN, SLOW_MS, SURFACES, TEST_OPTIONS, boot, hostless, mountPane, runCommand, test } from './helpers'
 
 const EMPTY = 'No prompts yet. The prompts you send are listed here.'
 const SCROLL_FAILED = 'Could not jump to that prompt.'

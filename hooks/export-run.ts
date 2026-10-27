@@ -34,11 +34,15 @@ export async function exportOutcome(engine: Engine, io: StoreIo, env: ExportEnv,
   return (await io.attempt('export', () => exportSession(engine, io, env, wanted, only), null)) ?? env.t('toast.exportFailed')
 }
 
+// The engine adds an answer block once it is written, so one exported while Claude answers lacks the block being
+// written: the line says so.
 async function exportSession(engine: Engine, io: StoreIo, env: ExportEnv, wanted: ExportFormat | undefined, only: AnswerOnly | undefined): Promise<string> {
   const format = await formatToWrite(engine, wanted, storedExportFormat((await io.get('exportLast')).value), env.pdfBrowser)
   const done = await writeExport(engine, format, env, only)
-  if (done.isWritten && only === undefined) await rememberFormat(engine, io, format)
-  return done.line
+  if (!done.isWritten || only !== undefined) return done.line
+  await rememberFormat(engine, io, format)
+  // Saved already: a refused read leaves the line as it is rather than saying the export failed.
+  return (await engine.cells.turnRunning.read().catch(() => false)) ? `${done.line} ${env.t('toast.exportMidTurn')}` : done.line
 }
 
 async function exportFolderOf(engine: Engine, exportDirectory: unknown): Promise<{ folder: string | null; os: string | undefined }> {

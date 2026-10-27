@@ -1,8 +1,8 @@
 // When the host fails: store reads and writes that fail, a read-only store, a band drawn before the start, a press that
 // throws, and timers that stopped.
-import { expect, test } from 'claude-code/testing'
+import { expect } from 'claude-code/testing'
 import type { ButtonConfig, Layout } from '../types/index'
-import { SLOW_MS, TEST_OPTIONS, boot, keysOf, mountBand, mountPane, seedButtons } from './helpers'
+import { SLOW_MS, TEST_OPTIONS, boot, keysOf, mountBand, mountPane, seedButtons, test } from './helpers'
 
 const MINUTE = 60_000
 const FOCUS_DONE = 'Focus session finished. Time for a break.'

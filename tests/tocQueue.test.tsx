@@ -2,10 +2,10 @@
 // the turn read (delivered into the turn) or its stored row (queued behind it). The prompts tab used to list such a
 // prompt twice.
 // Parts ported from oikon48/prompt-rail (MIT): see THIRD_PARTY_NOTICES.md.
-import { expect, test } from 'claude-code/testing'
+import { expect } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { On, RenderSurface } from 'claude-code'
-import { PLUGIN, SURFACES, TEST_OPTIONS, boot, mountPane } from './helpers'
+import { PLUGIN, SURFACES, TEST_OPTIONS, boot, mountPane, test } from './helpers'
 
 const id = (n: number): string => `${String(n).padStart(8, '0')}-0000-4000-8000-000000000000`
 // The engine's own answers beneath the mod for the turns these tests raise.

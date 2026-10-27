@@ -1,10 +1,10 @@
 // The band above the prompt: what fits at each width, the person's layout, another mod's band below ours, yielding, and
 // what a press does.
-import { expect, test } from 'claude-code/testing'
+import { expect } from 'claude-code/testing'
 import type { ConfigRow } from 'claude-code'
 import { ACCENT } from '../hooks/card'
 import { chipCells, shadeOf } from '../hooks/chip'
-import { NOW, SLOW_MS, SURFACES, TEST_OPTIONS, boot, keysOf, mountBand, runCommand, seedButtons } from './helpers'
+import { NOW, SLOW_MS, SURFACES, TEST_OPTIONS, boot, keysOf, mountBand, runCommand, seedButtons, test } from './helpers'
 
 const MINUTE = 60_000
 const ALL = ['pomodoro', 'btn:ex-review', 'btn:ex-usage', 'btn:b-deslop', 'btn:b-commit', 'edit']

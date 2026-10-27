@@ -1,10 +1,10 @@
 // What the prompts tab's hooks on turns do, and the debug line a failed hook leaves. The hook bodies are here;
-// register.tsx registers them. They read no `$.state` value, so they need no cell of register.tsx.
+// register.tsx registers them. The turn hooks keep whether a turn runs in its `turnRunning` cell, tab on or off.
 import type { Hook, HookFailure, MatchedHook } from 'claude-code'
 import type { Engine } from './runtime'
 import { noteTranscript } from './toc-history'
-import { noteAppend, notePromptRow, notePromptSent, noteTurnEnd, noteTurnStart } from './toc-live'
-import { isOwnPrompt, isTocKind } from './tools/toc'
+import { noteAppend, noteCommandRow, notePromptRow, notePromptSent, noteTurnEnd, noteTurnStart } from './toc-live'
+import { isOwn, isOwnPrompt, isTocKind } from './tools/toc'
 import { cleanText } from './tools/transcript'
 
 // What this module load knows that the hooks ask (register.tsx's `runtime`).
@@ -13,7 +13,7 @@ type Live = () => { isActive: boolean; isStoreReadOnly: boolean }
 // The hooks as register.tsx registers them, for their `e`, `next` and result.
 type SessionStartHook = Hook<'classic.SessionStart'>
 type ReceiveHook = Hook<'session.receive'>
-type AppendHook = MatchedHook<'session.append', { readonly door: readonly ['prompt', 'response'] }>
+type AppendHook = MatchedHook<'session.append', { readonly door: readonly ['prompt', 'command', 'response'] }>
 type TurnStartHook = Hook<'turn.start'>
 type TurnCompleteHook = Hook<'turn.complete'>
 
@@ -36,20 +36,25 @@ export async function receivePrompt(engine: Engine, e: Parameters<ReceiveHook>[1
 }
 
 // The send button's prompt is listed as its row is appended: 2.1.310 draws that row to every plugin's UserMessage hook
-// but this mod's, and runs none of its prompt.submit. A row drawn too (the test host draws it) is the same entry.
+// but this mod's, and runs none of its prompt.submit. A row drawn too (the test host draws it) is the same entry. A
+// slash command's own row (door `command`) is listed as it is appended too, as no plugin is handed it drawn
+// (toc-live.ts noteCommandRow).
 export async function appendRow(engine: Engine, e: Parameters<AppendHook>[1], next: Parameters<AppendHook>[2], live: Live): Promise<Awaited<ReturnType<AppendHook>>> {
   if (live().isActive) noteAppend(e, engine.plugin.name)
-  const isSent = e.door === 'prompt' && e.agentId === undefined && e.message.type === 'user' && e.message.isMeta !== true
-  if (live().isActive && isSent && isOwnPrompt(e.origin, engine.plugin.name)) notePromptRow(engine, e.uuid, cleanText(e.message.content), undefined, await engine.clock.now())
+  const isSent = e.agentId === undefined && e.message.type === 'user' && e.message.isMeta !== true
+  if (live().isActive && isSent && e.door === 'prompt' && isOwnPrompt(e.origin, engine.plugin.name)) notePromptRow(engine, e.uuid, cleanText(e.message.content), undefined, await engine.clock.now())
+  if (live().isActive && isSent && e.door === 'command' && (isTocKind(e.origin.kind) || isOwn(e.origin, engine.plugin.name))) noteCommandRow(engine, e.uuid, cleanText(e.message.content), await engine.clock.now())
   return next(e)
 }
 
 export async function startTurn(engine: Engine, e: Parameters<TurnStartHook>[1], next: Parameters<TurnStartHook>[2], live: Live): Promise<Awaited<ReturnType<TurnStartHook>>> {
+  if (e.agentId === undefined) await engine.cells.turnRunning.update(() => true)
   if (live().isActive) await noteTurnStart(engine, e.agentId)
   return next(e)
 }
 
 export async function completeTurn(engine: Engine, e: Parameters<TurnCompleteHook>[1], next: Parameters<TurnCompleteHook>[2], live: Live): Promise<Awaited<ReturnType<TurnCompleteHook>>> {
+  if (e.agentId === undefined) await engine.cells.turnRunning.update(() => false)
   if (live().isActive) await noteTurnEnd(engine, e)
   return next(e)
 }

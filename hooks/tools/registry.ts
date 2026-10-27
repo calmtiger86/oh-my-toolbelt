@@ -35,7 +35,7 @@ export type Ctx = {
   state: Snapshot
   t: TFn
   now: number
-  // The locale for words in the screen's language (the date tool's weekday): i18n.ts `wordLocale`.
+  // The locale for dates, times and weekdays (the date tool): i18n.ts `resolveLanguage`.
   locale: string
   // Lets a label be clipped by display cells (the short form of a user button).
   cells: (text: string) => number
@@ -365,6 +365,7 @@ export const emptySnapshot = (): Snapshot => ({
   paneTab: 'tools',
   paneStarted: false,
   tocMoved: 0,
+  turnRunning: false,
   guideSection: 'start',
   buttons: defaultButtons(),
   layout: defaultLayout(),

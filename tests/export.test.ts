@@ -136,6 +136,41 @@ test('the reply to a command or a notification is a turn of its own, not joined 
   ]))).toEqual([['user', ['Start the agent.']], ['assistant', ['Started.']], ['assistant', ['The agent is done.']], ['user', ['/co']], ['assistant', ['Saved.']]])
 })
 
+// Regression: Esc left the engine's notice of it as a user row, which an export listed as something the person wrote.
+test('the notice of an interruption is no one\'s words, and the replies around it stay apart', () => {
+  const messages = [
+    user('Write a long essay.'),
+    claude('Once upon'),
+    user('[Request interrupted by user]'),
+    claude('A short one: done.'),
+    user('Run the tests.'),
+    claude('Running.', [use('Bash', { command: 'npm test' })]),
+    user('[Request interrupted by user for tool use]\n'),
+    claude('Stopped.'),
+  ]
+  expect(said(turnsOf(messages))).toEqual([
+    ['user', ['Write a long essay.']],
+    ['assistant', ['Once upon']],
+    ['assistant', ['A short one: done.']],
+    ['user', ['Run the tests.']],
+    ['assistant', ['Running.']],
+    ['assistant', ['Stopped.']],
+  ])
+  for (const format of ['txt', 'md', 'html'] as const) expect(exportParts(messages, format, meta())[0] ?? '', format).not.toContain('interrupted')
+})
+
+test('a command the person typed stays beside an interruption notice, and so do words that only start like the notice', () => {
+  expect(said(turnsOf([
+    claude('Done.'),
+    user('[Request interrupted by user]'),
+    user('<command-message>reload-plugins</command-message>\n<command-name>/reload-plugins</command-name>\n<command-args></command-args>'),
+    claude('Reloaded.'),
+  ]))).toEqual([['assistant', ['Done.']], ['user', ['/reload-plugins']], ['assistant', ['Reloaded.']]])
+  for (const typed of ['[Request interrupted by user] please go on', '[Request interrupted by user for tool use] why?', '[Request interrupted by user', '[Request interrupted by users]', 'Note: [Request interrupted by user]']) {
+    expect(said(turnsOf([user(typed)]))).toEqual([['user', [typed]]])
+  }
+})
+
 // Security: a row that starts with one of the engine's tags may be output, so one that does not read as its tags goes.
 test('a row that starts with the engine\'s tag but does not read as its tags goes; other text in tags stays as written', () => {
   for (const typed of ['<command-name> is a tag, what is it for?', '<command-name>/x</command-name> what does this do?', '<bash-input>ls', '<command-args>a</command-args><b>bold</b>', '<task-notification>']) {

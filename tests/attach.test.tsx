@@ -1,8 +1,8 @@
 // The attach button: the pure parts, then the picker each system gets and the @ mentions it leaves.
-import { expect, test } from 'claude-code/testing'
+import { expect } from 'claude-code/testing'
 import type { On } from 'claude-code'
-import { ATTACH_TIMEOUT_MS, mentionText, pickedPaths } from '../hooks/tools/attach'
-import { TEST_OPTIONS, boot, isSamePath, mountBand } from './helpers'
+import { ATTACH_TIMEOUT_MS, mentionText, pickedPaths, shortPath } from '../hooks/tools/attach'
+import { TEST_OPTIONS, boot, isSamePath, mountBand, test } from './helpers'
 
 const OPTIONS = { ...TEST_OPTIONS, attachEnabled: true } as const
 
@@ -14,13 +14,29 @@ test('a picker prints a path a line; a path with a space is quoted as one mentio
   expect(mentionText(['/a/x.png', '/b/my file.txt'])).toBe('@/a/x.png @"/b/my file.txt" ')
 })
 
+// Regression: whole paths put the person's user name in the prompt box, seen in any recording of the screen.
+test('a picked file goes in by its shortest path: inside the session\'s folder, then from ~, else whole', () => {
+  expect(shortPath('/work/site/index.html', '/work', '/Users/me')).toBe('site/index.html')
+  expect(shortPath('/Users/me/work/a.txt', '/Users/me/work/', '/Users/me')).toBe('a.txt')
+  expect(shortPath('/Users/me/Downloads/my file.png', '/work', '/Users/me')).toBe('~/Downloads/my file.png')
+  // A neighbour whose name starts the same is not inside; the root and no home shorten nothing.
+  expect(shortPath('/workshop/a.txt', '/work', undefined)).toBe('/workshop/a.txt')
+  expect(shortPath('/etc/hosts', '/', '/')).toBe('/etc/hosts')
+  // A session folder above the home folder: from ~, so the user name stays out.
+  expect(shortPath('/Users/me/Downloads/a.png', '/Users', '/Users/me')).toBe('~/Downloads/a.png')
+  expect(shortPath('/Users/other.txt', '/Users', '/Users/me')).toBe('other.txt')
+  expect(shortPath('/Users/me/a.txt', '/Users/me', '/Users/me')).toBe('a.txt')
+  expect(mentionText(['site/index.html', '~/Downloads/my file.png'])).toBe('@site/index.html @"~/Downloads/my file.png" ')
+})
+
 // Pickers by their program: an answer, or undefined for one that cannot start.
 type Pickers = Record<string, { exitCode: number; stdout: string } | undefined>
 
 // The disk: osascript where a Mac keeps it, and the files a picker printed, when they are there. The kit makes every
-// path absolute on its own host (helpers.ts `hostless`), so the end is compared.
+// path absolute on its own host (helpers.ts `hostless`), so the end is compared. The session runs in /work.
 function stubDisk(on: On, present: readonly string[]): void {
   on('fs.exists', (_, e) => ({ value: present.some(path => isSamePath(e.path, path)) }))
+  on('session.cwd', () => ({ value: '/work' }))
 }
 
 function stubPickers(on: On, pickers: Pickers): { argv: string[][]; timeouts: (number | undefined)[] } {
@@ -56,6 +72,16 @@ test('in a terminal the button opens macOS\'s picker and puts the files in the p
   const desktop = await mountBand($, 'desktop', 258)
   expect(await desktop.find({ key: 'attach' })).toBeUndefined()
   await desktop.unmount()
+})
+
+test('on a Mac the files go in by their shortest paths', { options: OPTIONS }, async ($, on) => {
+  stubPickers(on, { '/usr/bin/osascript': { exitCode: 0, stdout: '/work/site/index.html\n/Users/me/Downloads/my file.png\n/opt/x.txt\n' } })
+  stubDisk(on, ['/usr/bin/osascript', '/work/site/index.html', '/Users/me/Downloads/my file.png', '/opt/x.txt'])
+  const { calls } = await boot($, on, { env: { LANG: 'en_US.UTF-8', HOME: '/Users/me' } })
+  const band = await mountBand($, 'terminal', 258)
+  await band.press({ key: 'attach' })
+  expect(calls.filled.at(-1)).toBe('@site/index.html @"~/Downloads/my file.png" @/opt/x.txt ')
+  await band.unmount()
 })
 
 test('with no osascript it is Linux: zenity, then kdialog', { options: OPTIONS }, async ($, on) => {

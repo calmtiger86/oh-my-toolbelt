@@ -47,25 +47,26 @@ function toTag(raw: string | undefined): string | null {
   return /^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$/.test(tag) ? tag : null
 }
 
+const languageOf = (tag: string): string => (tag.split('-')[0] ?? '').toLowerCase()
+
 // The language is the setting when it names a supported language; otherwise the first supported
 // language among the environment values (given in order: LC_ALL, LC_MESSAGES, LANG) and then the
-// Intl default locale; otherwise English. The locale for time formats is separate: the first valid
-// full tag from the same list (e.g. "de-DE" even though the interface falls back to English).
+// Intl default locale; otherwise English. The locale for dates, times and weekdays is the first valid
+// full tag from the same list, unless a language is picked and that tag speaks another one the toolbelt
+// has words for: then the picked language, so English on a ko_KR computer writes `5:32 AM`, not
+// `오전 5:32`. English is what a computer in a language with no words here picks, so a German computer
+// keeps `23.10.2026 Fr` with English picked or none (person's choice 2026-10-27).
 export function resolveLanguage(
   setting: string,
   envValues: readonly (string | undefined)[],
   intlLocale?: string,
 ): ResolvedLanguage {
   const tags = [...envValues, intlLocale].map(toTag).filter((tag): tag is string => tag !== null)
-  const fromTags = tags.map(tag => (tag.split('-')[0] ?? '').toLowerCase()).find(isLang)
-  return { lang: (isLang(setting) ? setting : undefined) ?? fromTags ?? 'en', locale: tags[0] ?? 'en' }
+  const system = tags[0] ?? 'en'
+  const spoken = languageOf(system)
+  if (isLang(setting)) return { lang: setting, locale: spoken === setting || (setting === 'en' && !isLang(spoken)) ? system : setting }
+  return { lang: tags.map(languageOf).find(isLang) ?? 'en', locale: system }
 }
-
-// The locale for words such as a weekday: the language picked in the setting when the time locale speaks another one,
-// so Korean on an en_US computer writes `금`; otherwise the time locale, so a German computer with no language picked
-// keeps `23.10.2026 Fr`.
-export const wordLocale = (resolved: ResolvedLanguage, setting: unknown): string =>
-  isLang(String(setting)) && (resolved.locale.split('-')[0] ?? '').toLowerCase() !== resolved.lang ? resolved.lang : resolved.locale
 
 // The runtime's default locale (step 3 of the language decision order), or undefined where Intl cannot say.
 export function systemLocale(): string | undefined {

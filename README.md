@@ -57,7 +57,7 @@ Inside Claude Code:
 
 It asks to add the marketplace (`y`) and the scope (Enter), then shows the settings: press Enter on each row to keep its default, then Save.
 
-To update: `claude plugin update oh-my-toolbelt`, then restart Claude Code; what changed is in [CHANGELOG.md](CHANGELOG.md). To remove: `claude plugin uninstall oh-my-toolbelt`.
+To update: `claude plugin update oh-my-toolbelt`, then type `/reload-plugins` in Claude Code or restart it; what changed is in [CHANGELOG.md](CHANGELOG.md). To remove: `claude plugin uninstall oh-my-toolbelt`.
 
 </details>
 
@@ -105,9 +105,9 @@ Information on the left, buttons on the right. When the window is narrow, the bu
 | Weather | Off until you pick one of 63 cities. Current conditions, refreshed every 30 minutes by default |
 | Pomodoro | Press it to start a focus round, again to pause, once more to go on. Breaks are timed only when Pomodoro auto break is on. A notification when a round ends, and a sound on macOS if you turn it on |
 | Your buttons | A saved prompt to put in the prompt box or send, or a slash command or skill to run. Group them into sets and switch between sets |
-| Attach | Your system's file picker; the files go into the prompt box as `@` mentions (terminal) |
+| Attach | Your system's file picker; the files go into the prompt box as `@` mentions (terminal), by a path relative to the project folder, from `~/` under your home folder, or else the whole path (always the whole path on Windows) |
 | Voice | Turns Claude Code's voice input on and off, where your Claude Code has `/voice` (terminal) |
-| Light / Dark | Switches Claude Code's theme to its light or dark pair |
+| Light / Dark | Switches Claude Code's theme to its light or dark pair. It shows only while the theme has such a pair in `/config`, so not with a custom theme |
 | Hide | Covers the conversation until you press it again |
 | Export | Saves the conversation in the format picked in the Status tab (Markdown at first) |
 | Notes | Opens the notes |
@@ -131,12 +131,12 @@ Press **Edit** or type `/toolbelt` to open it beside the conversation.
 <details>
 <summary><b>Commands and shortcuts</b></summary>
 
-In the terminal, press `ctrl+x`, let go, then `tab`: the toolbelt is selected. Tab moves between buttons, Enter presses one, Esc goes back to the prompt box. While it is selected, one letter presses a tool (`a` Attach, `v` Voice, `t` Light / Dark, `h` Hide, `e` Export, `n` Notes, `b` Edit, `m` more); your own buttons can have letters too. In the desktop app, click the buttons.
+In the terminal, press `ctrl+x`, let go, then `tab`: the toolbelt is selected. Tab moves between buttons, Enter presses one, Esc goes back to the prompt box. While it is selected, one letter presses a tool (`a` Attach, `v` Voice, `t` Light / Dark, `h` Hide, `e` Export, `n` Notes, `b` Edit, `m` the `…` button); your own buttons can have letters too. In the desktop app, click the buttons.
 
 | Command | What it does |
 |---|---|
 | `/toolbelt` (or `/tb`, when no other mod has it) | Open the panel |
-| `/toolbelt tools` · `toc` · `notes` · `clips` · `status` · `guide` | Open the panel at that tab |
+| `/toolbelt tools` · `toc` · `notes` · `clips` · `status` · `guide` | Open the panel at that tab (`toc` and `clips` open the Tools tab while their tab is off) |
 | `/toolbelt toc next` · `prev` · `first` · `last` · `<n>` · `find <words>` | Jump to a prompt |
 | `/toolbelt pomodoro start` · `pause` · `stop` · `reset` | Start or go on, pause, stop (the count of finished rounds stays) or reset (the count goes back to 0) |
 | `/toolbelt export [md\|html\|txt\|pdf]` | Export the conversation |
@@ -153,14 +153,14 @@ Every setting is a switch or a pick list in the panel's **Status** tab; all but 
 
 | Setting | Default | Choices |
 |---|---|---|
-| `language` | `auto` | `auto` (your system's), `en`, `ko`, `ja` |
+| `language` | `auto` | `auto` (your system's), `en`, `ko`, `ja`; the clock and the date follow it too |
 | `clockFormat` · `clockSeconds` | `auto` · off | `auto`, `12`, `24`; seconds on or off |
 | `dateFormat` | `auto` | `off`, `auto`, year first, day first, month first |
 | `timeZone` | `system` | Your computer's zone, `UTC`, or one of 53 cities |
 | `iconStyle` | `icon+label` | `icon+label`, `icon`, `label` (for terminals that draw emoji badly) |
 | `weatherPlace` | `off` | `off` or one of 63 cities |
-| `temperatureUnit` · `weatherRefreshMinutes` | `auto` · `30` | `auto` (Fahrenheit for US cities), Celsius or Fahrenheit; 10 to 180 minutes |
-| `pomodoroFocusMinutes` · `pomodoroBreakMinutes` | `25` · `5` | 5 to 120; 1 to 60 |
+| `temperatureUnit` · `weatherRefreshMinutes` | `auto` · `30` | `auto` (Fahrenheit for US cities), Celsius or Fahrenheit; 10, 15, 30, 60, 120 or 180 minutes |
+| `pomodoroFocusMinutes` · `pomodoroBreakMinutes` | `25` · `5` | 5 to 60 in steps of 5, then 75, 90 or 120; 1, 2, 3, 5, 10, 15, 20, 30, 45 or 60 |
 | `pomodoroAutoBreak` · `pomodoroNotify` | off · on | Start the break when a focus round ends (without it no break is timed); notify when a round ends |
 | `pomodoroSound` · `pomodoroSoundName` | off · `bell` | A sound when a round ends (macOS): `bell`, `chime`, `ding`, `digital`, `marimba`, `soft` |
 | `exportDirectory` · `pdfBrowser` | `downloads` · `off` | Where exports go (`downloads`, `desktop`, `documents`, `home`, or `session`: the project folder, where a file could end up in git); the browser that prints PDFs (`auto`, `chrome`, `edge`, `brave`, `chromium`) |
@@ -180,7 +180,7 @@ Every setting is a switch or a pick list in the panel's **Status** tab; all but 
 
 - **Network:** only the weather, and only after you pick a city. `api.open-meteo.com` receives that city's coordinates and the temperature unit; like any web request, it also sees your IP address.
 - **Your conversation:** while the Prompts tab is on (the default), it reads the prompts you send, what each turn did (tool names, edited files, time) and this session's transcript file, to list your prompts; Export writes the conversation to a file you asked for, keeping the commands you typed but not their output or the hidden text Claude Code puts ahead of your prompts. Neither leaves your computer.
-- **Stored on this computer:** your buttons, layout, icons, notes, the pomodoro, the weather cache, a few preferences and the transcript file paths of your 20 most recent sessions, recorded while the Prompts tab is on (on by default), as plain text in Claude Code's plugin store. The clipboard history stays in memory only. While Claude Code runs, other mods you installed can read your notes, buttons and clipboard history.
+- **Stored on this computer:** your buttons, layout, icons, notes, the pomodoro, the weather cache, a few preferences and the transcript file paths of your 20 most recent sessions, recorded while the Prompts tab is on (on by default), as plain text in Claude Code's plugin store. The clipboard history stays in memory only. While Claude Code runs, other mods you installed can read your notes, your buttons (and one you are editing), the clipboard history with your latest selection, and the last error.
 - **Programs it starts:** your file picker when you press Attach and a browser when you export a PDF; by itself, while the Prompts tab is on, `tail` (PowerShell on Windows) to read this session's transcript when it is over 4 MiB. Each with an argument list and no shell.
 - **The model** sees only what you choose to send: a prompt button you press, or a note, clip, earlier prompt or attached file you put in the prompt box. The one-line reply of a `/toolbelt` command stays in the conversation, where the model can read it.
 
@@ -193,10 +193,12 @@ The full account is in [PRIVACY.md](PRIVACY.md).
 
 - **Desktop app:** no Attach or Voice button (its prompt box has its own), no PDF export, and a pomodoro alert is a message in the app. Clicking a prompt opens it in place instead of scrolling, as Claude Code lets no mod move the conversation there. Settings changed in its Status tab apply at once and are kept by the toolbelt; they are copied to `/config` the next time you use it in the terminal.
 - **Clipboard tab:** collects in the desktop app and where Claude Code draws the whole terminal screen (`"tui": "fullscreen"`); in the inline layout your terminal app does the selecting, so nothing reaches the toolbelt.
-- **Hide** covers the conversation but not the lines Claude Code draws itself, such as the logo and notices.
+- **Attach:** once the prompt is sent, Claude Code's own "Read" line under it shows a file outside the project folder by its whole path; the toolbelt cannot change that line.
+- **Hide** covers the conversation but not the lines Claude Code draws itself: command lines, attachment lines, the logo at the top and notices.
 - **Hide and your buttons:** with `curtainRestoreOnSubmit` off, a prompt sent by one of your send buttons stays in view (its answer is covered), as Claude Code does not pass that prompt's row to the mod that sent it.
 - **Export:** a prompt that starts like one of Claude Code's own tags (such as `<command-name>` or `<bash-stdout>`) can be left out of an export, as it cannot be told apart from Claude Code's output.
-- **Prompts tab:** the turn details shown for a prompt count only the turn that prompt started. The answer to a `!` shell command (bash mode), a follow-up turn Claude Code starts by itself after something you do, and a turn started by another mod, by one of your buttons that runs a command or skill, or by a task notification count toward no prompt. In an older conversation whose transcript file records no turn lengths, such a turn may still count toward the prompt before it.
+- **Prompts tab:** a slash command Claude answers (a skill or a command of your own), typed or run by one of your buttons, is listed as you typed it; one that only acts in Claude Code (`/model`, `/login`) is not. The turn details shown for a prompt count only the turn that prompt started. The answer to a `!` shell command (bash mode), a follow-up turn Claude Code starts by itself after something you do, and a turn started by another mod or by a task notification count toward no prompt. In an older conversation whose transcript file records no turn lengths, such a turn may still count toward the prompt before it.
+- **Command buttons:** one pressed while Claude answers runs when the answer ends, and a message says so; pressing it again while it waits does not run it twice.
 - **Tested on** macOS with Claude Code 2.1.309 and 2.1.310, in the terminal and the desktop app. The automatic tests run on Linux and Windows too; the file pickers there have not been tried by hand.
 
 </details>
@@ -226,7 +228,7 @@ npx -p typescript@5 tsc -p .   # type-check, once Claude Code has loaded the mod
 ```
 
 - **How it fits together:** [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) is a one-page map of the modules, the state, the store and the rules the engine holds a mod to.
-- **Add a language:** copy `hooks/locales/en.ts` to `hooks/locales/<code>.ts` and translate it; register it in `hooks/lib/i18n.ts` and `tests/i18n.test.ts`; add the code to the `language` options in `.claude-plugin/plugin.json`. The tests check that every key and placeholder is there. The Japanese text has not been reviewed by a native speaker yet; corrections are welcome.
+- **Add a language:** copy `hooks/locales/en.ts` to `hooks/locales/<code>.ts` and translate it; register it in `hooks/lib/i18n.ts` and `tests/i18n.test.ts`; add `settings.value.language.<code>`, the language's name in its own words, to every file in `hooks/locales/`; add the code to the `language` options in `.claude-plugin/plugin.json`. The tests check that every key and placeholder is there. The Japanese text has not been reviewed by a native speaker yet; corrections are welcome.
 - **Add a tool:** tools are plain objects in `hooks/tools/registry.ts` (a label, a priority, what a press does as a list of effects); `hooks/register.tsx` is the one place effects become calls on the engine.
 - **Contributing:** issues and pull requests are welcome. Keep code, comments and commit messages in English, and run the three checks above before you open a pull request. CI runs validate and the tests on macOS, Linux and Windows.
 

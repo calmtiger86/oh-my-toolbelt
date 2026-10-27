@@ -124,13 +124,13 @@ export const hidesButtonNames = (ctx: Ctx, columns: number | undefined, knownCom
 function drawItem(kit: BandKit, model: BandModel, item: BandItem, onPress: PressItem): RenderElement {
   const { Button, Text } = kit
   if (item.chip !== undefined) {
-    const press = item.kind === 'button' ? { onPress: () => void onPress(item.id, model.surface) } : {}
+    const press = item.kind === 'button' ? { onPress: () => onPress(item.id, model.surface) } : {}
     return drawChip(kit, item.chip, { key: item.id, label: item.label, surface: model.surface, theme: model.theme, ...press })
   }
   const props = {
     key: item.id,
     label: item.label,
-    onPress: (press: { surface: RenderSurface }) => void onPress(item.id, press.surface),
+    onPress: (press: { surface: RenderSurface }) => onPress(item.id, press.surface),
     // The desktop app's own Tab never reaches the band, so a letter there could not be pressed.
     ...(item.hotkey === undefined || model.surface === 'desktop' ? {} : { hotkey: item.hotkey }),
     ...(item.isDim ? { dimColor: true } : {}),
@@ -155,7 +155,7 @@ export function drawBand(kit: BandKit, model: BandModel, onPress: PressItem, oth
   const row = (
     <Box key="band-row" flexDirection="row" justifyContent="space-between">
       <Box key="band-left" flexDirection="row" flexShrink={0} columnGap={LEFT_COLUMN_GAP}>
-        <Button key={FOLD_ID} label={FOLD_MARK} plain dimColor onPress={press => void onPress(FOLD_ID, press.surface)} />
+        <Button key={FOLD_ID} label={FOLD_MARK} plain dimColor onPress={press => onPress(FOLD_ID, press.surface)} />
         {model.left.flatMap((item, i) => [
           ...(i > 0 && model.surface === 'terminal' ? [<Text dimColor>{INFO_RULE}</Text>] : []),
           drawItem(kit, model, item, onPress),
@@ -188,7 +188,7 @@ export function drawFolded(kit: BandKit, onPress: PressItem, other?: RenderEleme
   const { Box, Button } = kit
   const row = (
     <Box key="band-row" flexDirection="row">
-      <Button key={UNFOLD_ID} label={UNFOLD_MARK} plain dimColor onPress={press => void onPress(UNFOLD_ID, press.surface)} />
+      <Button key={UNFOLD_ID} label={UNFOLD_MARK} plain dimColor onPress={press => onPress(UNFOLD_ID, press.surface)} />
     </Box>
   )
   return other === undefined ? row : <Box key="band" flexDirection="column">{row}{other}</Box>

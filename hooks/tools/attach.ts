@@ -33,6 +33,26 @@ const WHOLE_PATH = /^(\/|[A-Za-z]:\\|\\\\)/
 export const pickedPaths = (stdout: string): string[] =>
   stdout.split('\n').map(line => stripControls(line.replace(/\r$/, ''))).filter(line => WHOLE_PATH.test(line) && !line.includes('"'))
 
+// The rest of a path under a folder, or undefined; the root as a folder is no shorter.
+const under = (path: string, dir: string | undefined): string | undefined => {
+  const base = dir?.replace(/\/+$/, '')
+  return base && path.startsWith(`${base}/`) ? path.slice(base.length + 1) : undefined
+}
+
+// The shortest path Claude Code reads a mention by (tried on 2.1.310): relative inside the session's folder, from ~
+// under the home folder, else whole, so the prompt box shows no user name. Claude Code's own "Read" line under a sent
+// prompt still shows a file outside the folder by its whole path.
+// ponytail: plain prefix match, so a folder reached through a symlink (/tmp for /private/tmp) keeps whole paths;
+// compare real paths if that comes up.
+export const shortPath = (path: string, cwd: string, home: string | undefined): string => {
+  const inCwd = under(path, cwd)
+  const inHome = under(path, home)
+  // A session folder above the home folder (`/Users`) would put the user name back in a relative path.
+  const isHomeInside = home !== undefined && under(home, cwd) !== undefined
+  if (inHome !== undefined && (inCwd === undefined || isHomeInside)) return `~/${inHome}`
+  return inCwd ?? path
+}
+
 // A path with a space is read as one file only inside double quotes.
 export const mentionText = (paths: readonly string[]): string => `${paths.map(path => (/\s/.test(path) ? `@"${path}"` : `@${path}`)).join(' ')} `
 

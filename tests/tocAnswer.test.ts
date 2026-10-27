@@ -16,7 +16,7 @@ const TALK: SessionMessage[] = [
   said('assistant', 'Second run.'),
 ]
 
-test('the answer is what Claude wrote after the prompt up to the next prompt the table lists; a tool result or a slash command is none', () => {
+test('the answer is what Claude wrote after the prompt up to the next prompt the table lists; a tool result or a bare `/` line (a forked skill\'s) is none', () => {
   expect(answerFor(TALK, 'run the tests', 1)).toEqual({ prompt: 'run the tests', answer: 'First run.\n\nAll green.\n\nStill green.' })
 })
 
@@ -24,6 +24,15 @@ test('the same prompt sent twice is counted from the latest, as the messages hol
   expect(answerFor(TALK, 'run the tests', 0)?.answer).toBe('Second run.')
   expect(answerFor(TALK.slice(4), 'run the tests', 0)?.answer).toBe('Second run.')
   expect(answerFor(TALK, 'run the tests', 2)).toBeNull()
+})
+
+// Regression: a prompt that was a slash command alone was not listed, so the desktop app could not open its answer.
+test('a slash command\'s answer is found by `/name args`, and its prompt comes back as typed', () => {
+  const talk = [said('user', '<command-message>co</command-message>\n<command-name>/co</command-name>\n<command-args>today</command-args>'), said('assistant', 'Saved.'), said('user', 'next'), said('assistant', 'Next.')]
+  expect(answerFor(talk, '/co today', 0)).toEqual({ prompt: '/co today', answer: 'Saved.' })
+  // The prompt to put back in the prompt box is the command whole, long arguments and blank lines too.
+  const long = `first\n\n${'x'.repeat(3000)}`
+  expect(answerFor([said('user', `<command-message>hs</command-message>\n<command-name>/hs</command-name>\n<command-args>${long}</command-args>`), said('assistant', 'Set.')], promptText(`/hs ${long}`), 0)?.prompt).toBe(`/hs ${long}`)
 })
 
 // Regression: "ok" opened the answer to "fix it, then say ok".

@@ -1,6 +1,6 @@
 // /toolbelt and /tb, the pomodoro's end and the reload after /clear.
-import { expect, test } from 'claude-code/testing'
-import { COMMANDS, NOW, SLOW_MS, SURFACES, TEST_OPTIONS, boot, keysOf, mountBand, mountPane, runCommand } from './helpers'
+import { expect } from 'claude-code/testing'
+import { COMMANDS, NOW, SLOW_MS, SURFACES, TEST_OPTIONS, boot, keysOf, mountBand, mountPane, runCommand, test } from './helpers'
 
 const MINUTE = 60_000
 const HOUR = 60 * MINUTE

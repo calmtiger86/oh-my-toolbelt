@@ -5,7 +5,7 @@ import type { ProcessRunResult } from 'claude-code'
 import type { TFn } from './lib/i18n'
 import { isWindows, powershellPath } from './lib/platform'
 import type { Engine } from './runtime'
-import { ATTACH_TIMEOUT_MS, LINUX_PICKERS, MAC_PICKER, MAC_PICKER_PATH, WINDOWS_PICKER_ARGS, mentionText, pickedPaths } from './tools/attach'
+import { ATTACH_TIMEOUT_MS, LINUX_PICKERS, MAC_PICKER, MAC_PICKER_PATH, WINDOWS_PICKER_ARGS, mentionText, pickedPaths, shortPath } from './tools/attach'
 
 // A run rejected this close to the timeout was a picker left open, not one that could not start.
 const TIMEOUT_SLACK_MS = 5_000
@@ -60,6 +60,10 @@ async function pickAndFill(engine: Engine, t: TFn): Promise<void> {
   // Only files that are there: a name with a line break could leave a stray relative line.
   const there = (await Promise.all(picked.paths.map(async path => ((await engine.fs.exists(path)) ? [path] : [])))).flat()
   if (there.length === 0) return
-  const filled = await engine.prompt.fill({ text: mentionText(there), mode: 'insert' })
-  if (!filled.isFilled) engine.ui.toast(t('toast.attachFillRejected', { paths: there.join(' ') }))
+  // ponytail: Windows keeps whole paths: its paths differ in form, and relative and ~ mentions were tried on POSIX only.
+  const cwd = await engine.session.cwd()
+  const home = await engine.env.get('HOME')
+  const paths = windows ? there : there.map(path => shortPath(path, cwd, home))
+  const filled = await engine.prompt.fill({ text: mentionText(paths), mode: 'insert' })
+  if (!filled.isFilled) engine.ui.toast(t('toast.attachFillRejected', { paths: paths.join(' ') }))
 }

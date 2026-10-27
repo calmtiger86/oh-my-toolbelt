@@ -6,7 +6,7 @@ import type { Timer } from 'claude-code'
 import { TOC_REDRAW_MS, errorText } from './runtime'
 import type { Engine } from './runtime'
 import type { TFn } from './lib/i18n'
-import { PROVISIONAL_ID, answerFor, bandCardText, emptyTurn, isTocOrigin, jumpNote, pickIndex, promptIndexOf, promptOf, readIndex, rowKey, toolUse, tocRows, tocScope, withRequestId, withUses } from './tools/toc'
+import { PROVISIONAL_ID, answerFor, bandCardText, commandOf, emptyTurn, isTocOrigin, jumpNote, pickIndex, promptIndexOf, promptOf, readIndex, rowKey, toolUse, tocRows, tocScope, withRequestId, withUses } from './tools/toc'
 import type { Answered, BandCard, Opened, PlacedRow, Toc, TocEntry, TocMove, TocView, TocViewOp, Turn } from './tools/toc'
 import { emptyQueue, entryKey, noteDrawn, noteSent, restQueue } from './tools/toc-queue'
 import type { Queue } from './tools/toc-queue'
@@ -42,6 +42,8 @@ type Live = {
   // The prompt the main loop's replies now belong to, and whether its turn runs.
   turnKey: string | undefined
   isRunning: boolean
+  // The slash command prompt.submit last ran for the person, by name, until its own row is appended (noteCommandRow).
+  commandSent: string | undefined
   onScreen: ReadonlyMap<string, Shown>
   reports: number
   // The key of the prompt being read, kept while no row that places anyone shows.
@@ -58,7 +60,7 @@ type Live = {
 }
 
 const initialLive = (): Live => ({
-  toc: new Map(), queue: emptyQueue(), known: new Set(), filed: new Set(), owners: new Map(), turns: new Map(), turnKey: undefined, isRunning: false, onScreen: new Map(), reports: 0,
+  toc: new Map(), queue: emptyQueue(), known: new Set(), filed: new Set(), owners: new Map(), turns: new Map(), turnKey: undefined, isRunning: false, commandSent: undefined, onScreen: new Map(), reports: 0,
   reading: undefined, landed: undefined, drawnCurrent: -1, unreachable: new Set(), isUnscrollableSaid: false, viewAgent: undefined, opened: null,
 })
 
@@ -174,11 +176,33 @@ function seeRow(engine: Engine, component: string, id: string, place: Place): vo
 // A prompt's row as it is drawn (`now` by `$.clock.now()`), or as session.append hands the send button's, whose row is
 // never drawn to this mod (no `place`): listed once by its key, the provisional row not at all, a queued prompt's rows
 // as one (hooks/tools/toc-queue.ts), and where it is on screen. A prompt read from the transcript
-// file jumps to the first id its row is drawn under; a row the file holds as no prompt (bash mode, a slash command)
-// stays out, as the read left it, and so does one the file would hold as none (`promptOf`), before any read.
+// file jumps to the first id its row is drawn under; a row the file holds as no prompt (bash mode, a command that only
+// acts here) stays out, as the read left it, and so does one the file would hold as none (`promptOf`), before any read.
 export function notePromptRow(engine: Engine, requestId: string, text: string, place: Place | undefined, now: number): void {
+  if (promptOf(text) !== undefined) listRow(engine, requestId, text, place, now)
+}
+
+// prompt.submit ran a slash command for the person or this mod's button. It runs one Claude answers (a skill, a command
+// file, a built-in that asks the model) and none that only acts here (`/model`, `/reload-plugins`), right before that
+// command's own row is appended, a command typed while a turn runs too, as it runs (2.1.310).
+export function noteCommandSent(name: string): void {
+  live = { ...live, commandSent: name }
+}
+
+// A slash command's own row as session.append hands it (door `command`), as `/name args`: listed when it is the command
+// prompt.submit ran, and the turn its replies belong to starts. Only the composer's placeholder of it is drawn to this
+// mod, so it is listed under its stored id, where a jump lands (2.1.310).
+export function noteCommandRow(engine: Engine, uuid: string, text: string, now: number): void {
+  const command = commandOf(text)
+  if (command === undefined || live.commandSent === undefined || command.split(/\s/, 1)[0] !== `/${live.commandSent}`) return
+  const key = rowKey(uuid)
+  live = { ...live, commandSent: undefined, turnKey: key, turns: new Map([...live.turns, [key, emptyTurn()]]) }
+  listRow(engine, uuid, command, undefined, now)
+}
+
+function listRow(engine: Engine, requestId: string, text: string, place: Place | undefined, now: number): void {
   const key = rowKey(requestId)
-  if (promptOf(text) === undefined || (live.known.has(key) && !live.toc.has(key))) return
+  if (live.known.has(key) && !live.toc.has(key)) return
   const listed = noteDrawn({ toc: live.toc, queue: live.queue }, requestId, text, now, live.isRunning)
   const isFiled = live.filed.has(key)
   const toc = isFiled ? withRequestId(listed.toc, key, requestId) : listed.toc
@@ -264,6 +288,16 @@ export async function noteHistory(engine: Engine, history: History): Promise<voi
   await bumpToc(engine)
 }
 
+// A load that came in the middle of a turn (a reload, or the tab turned on) learns from the turnRunning cell that it
+// runs: a prompt sent before it ends is drawn under ids the engine never stores (tools/toc-queue.ts).
+// Read before `live` is spread, so a row noted while the read waits keeps its change.
+// ponytail: a turn.start or turn.complete noted during the read can be undone by the value read; mark a load that heard
+// a turn and leave it alone if that shows up.
+export async function restoreTurn(engine: Engine): Promise<void> {
+  const isRunning = await engine.cells.turnRunning.read()
+  live = { ...live, isRunning }
+}
+
 export async function noteTurnStart(engine: Engine, agentId: string | undefined): Promise<void> {
   if (agentId !== undefined) return
   // The transcript follows the new turn down from a prompt jumped to. Rows added before it are not a queued prompt's.
@@ -272,17 +306,32 @@ export async function noteTurnStart(engine: Engine, agentId: string | undefined)
 }
 
 // A main-loop turn ended: its time adds to its prompt's, and an interruption or an API error says how it went. The
-// next turn's replies belong to no prompt until one starts it, so a turn another plugin's prompt, a command, a
+// next turn's replies belong to no prompt until one starts it, so a turn another plugin's prompt or command, a
 // scheduled task or a notification started adds nothing to the card before it, as the transcript file reads it
 // (tools/transcript.ts historyOf).
+// A turn interrupted before any reply row of it was appended took its prompt back: 2.1.310 drops the prompt from the
+// conversation and puts its words back in the prompt box, and the file's next row skips it, so a read of the file lists
+// it no more (noteHistory). Its entry leaves the table now, so the prompts after keep the numbers a reload gives them,
+// and its key counts as a row the file holds as no prompt, so a late drawing of its row lists it no more (listRow).
+// The `[Request interrupted by user]` row the engine appends before the turn ends is no reply: it comes by the `note`
+// door. What else names the key (where the person reads, a refused jump, the opened row) finds no entry and draws
+// nothing, and the queue's other names of it keep a drawing of them from listing it again (tools/toc-queue.ts noteDrawn).
+// ponytail: seen for a typed prompt only; a command row's turn (noteCommandRow), an Esc while Claude only thinks and the
+// send button's prompt take the same rule unchecked. Probe each on a real screen and keep listed any the file keeps.
 export async function noteTurnEnd(engine: Engine, e: { agentId?: string; durationMs: number; reason: string }): Promise<void> {
   if (e.agentId !== undefined) return
   const key = live.turnKey
+  const rest = { isRunning: false, turnKey: undefined, queue: restQueue(live.queue) }
+  if (key !== undefined && e.reason === 'aborted' && ![...live.owners.values()].includes(key)) {
+    const listed = keyOf(key)
+    live = { ...live, ...rest, toc: new Map([...live.toc].filter(([other]) => other !== listed)), turns: new Map([...live.turns].filter(([other]) => other !== key)), known: new Set([...live.known, key, listed]) }
+    return bumpToc(engine)
+  }
   const turn = key === undefined ? undefined : (live.turns.get(key) ?? emptyTurn())
   const outcome = e.reason === 'aborted' ? 'interrupted' : e.reason === 'error' ? 'error' : turn?.outcome
   const ended = turn === undefined ? undefined : { ...turn, durationMs: (turn.durationMs ?? 0) + e.durationMs, ...(outcome === undefined ? {} : { outcome }) }
   const turns = key === undefined || ended === undefined ? live.turns : new Map([...live.turns, [key, ended]])
-  live = { ...live, isRunning: false, turns, turnKey: undefined, queue: restQueue(live.queue) }
+  live = { ...live, ...rest, turns }
   await bumpToc(engine)
 }
 
@@ -445,10 +494,11 @@ export function tocBandCards(width: number, t: TFn): BandCard[] {
 }
 
 // Nothing the table holds is in the new, empty conversation; the panel is drawn again once the old rows are gone.
+// Whether a turn runs is the engine's, not the table's, so it stays.
 export function resetToc(engine: Engine): void {
   timers.quiet?.cancel()
   timers.latest?.cancel()
   timers = { ...timers, quiet: null, latest: null }
-  live = initialLive()
+  live = { ...initialLive(), isRunning: live.isRunning }
   queueTocRedraw(engine)
 }

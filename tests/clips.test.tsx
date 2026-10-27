@@ -1,11 +1,11 @@
 // The clipboard tab (hooks/clips.ts): what the person copied by dragging, read each second from `$.ui.selection()`,
 // newest first, for this session only.
-import { expect, test } from 'claude-code/testing'
+import { expect } from 'claude-code/testing'
 import type { ClipBoard } from '../types/index'
 import type { EngineInterface } from 'claude-code'
 import { CLIPS_MAX, CLIP_CHARS_MAX, clipEffects, noteSelection, restoreClips, withReading } from '../hooks/clips'
 import { engineOf } from '../hooks/register'
-import { TEST_OPTIONS, boot, keysOf, mountPane } from './helpers'
+import { TEST_OPTIONS, boot, keysOf, mountPane, test } from './helpers'
 
 const EMPTY: ClipBoard = { clips: [], seen: null, changing: null }
 // The texts the board keeps after each reading, a second apart.

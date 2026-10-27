@@ -77,7 +77,8 @@ export type Act = (action: PaneAction, surface: RenderSurface) => unknown
 
 export type PaneModel = {
   ctx: Ctx
-  // How the status tab names the language in use, e.g. "ko (ko-KR)", and the versions running.
+  // How the status tab names the language in use and, when it adds something, the locale for dates and times, e.g.
+  // "ko (ko-KR)" or "en"; and the versions running.
   language: string
   versions: Versions | null
   knownCommands: readonly string[] | null

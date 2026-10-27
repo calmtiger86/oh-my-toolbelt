@@ -1,10 +1,10 @@
 // The panel: the layout rows move tools between sides and orders and save them, the form adds, edits and checks
 // buttons, and the more and status tabs draw.
-import { expect, test } from 'claude-code/testing'
+import { expect } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
 import type { ButtonConfig, Layout } from '../types/index'
-import { SLOW_MS, SURFACES, TEST_OPTIONS, boot, isManifestPath, keysOf, listOf, mountBand, mountPane, pick, runCommand } from './helpers'
+import { SLOW_MS, SURFACES, TEST_OPTIONS, boot, isManifestPath, keysOf, listOf, mountBand, mountPane, pick, runCommand, test } from './helpers'
 import { fitTabs } from '../hooks/pane'
 
 const layoutOf = (store: Map<string, unknown>) => store.get('layout') as Layout

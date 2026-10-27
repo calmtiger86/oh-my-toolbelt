@@ -65,6 +65,9 @@ const LEADING_TAG = /^<([a-z][a-z0-9_-]*)(?:\s[^>]*)?\/?>/
 const isEngineTag = (tag: string): boolean => ROW_TAGS.has(tag) || /^(?:local[-_]command|bash)[-_]/.test(tag)
 // A teammate's message, its sender named on the tag.
 const TEAMMATE_ROW = /^<teammate-message\b[^>]*>([\s\S]*)<\/teammate-message>$/
+// The notice the engine stores as a user row when the person interrupts a turn (`for tool use` while a tool runs), as
+// 2.1.310 words it. Only the whole row is it: the person can start a message with the same words.
+const INTERRUPTED_ROW = /^\[Request interrupted by user(?: for tool use)?\]$/
 
 // The bodies of a row made of the engine's tags alone, by tag, or null when anything else is in it or a tag is left
 // open. A body runs to its tag's last closing tag, so output that prints the tag (a file cat'ed) stays inside it. In a
@@ -86,11 +89,12 @@ function engineTags(text: string): ReadonlyMap<string, string> | null {
 // A person's row as they typed it, without what the engine put ahead of the typed text (a reminder carrying CLAUDE.md,
 // memory or a hook's context, an open artifact's view state): a slash command is its name and arguments (`/co the
 // words`), bash mode's input `! ls`, a teammate's message its words. A row of the engine's own (a command's or bash
-// mode's output, a notification) is no one's words: null, and any row with an output tag in it is one, as output that
-// prints the tags can read as a command. So is a row that starts with one of its tags but does not read as them: it may
-// be output, and the export keeps out what it cannot tell apart.
+// mode's output, a notification, the notice of an interruption) is no one's words: null, and any row with an output tag
+// in it is one, as output that prints the tags can read as a command. So is a row that starts with one of its tags but
+// does not read as them: it may be output, and the export keeps out what it cannot tell apart.
 function userText(text: string): string | null {
   const typed = cleanText(withoutReminders(text)).trim()
+  if (INTERRUPTED_ROW.test(typed)) return null
   const tags = typed === '' ? null : engineTags(typed)
   if (tags === null && isEngineTag(LEADING_TAG.exec(typed)?.[1] ?? '')) return null
   if (tags === null) return TEAMMATE_ROW.exec(typed)?.[1]?.trim() ?? typed

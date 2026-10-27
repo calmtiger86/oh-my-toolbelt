@@ -1,9 +1,9 @@
 // The curtain: nine kinds of row draw an empty box while it is up (the first block of a reply too), the band button,
 // /toolbelt curtain and curtainRestoreOnSubmit change it, and the contents tab keeps filling.
-import { expect, test } from 'claude-code/testing'
+import { expect } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { PromptOrigin, RenderSurface } from 'claude-code'
-import { PLUGIN, SLOW_MS, SURFACES, TEST_OPTIONS, boot, mountBand, mountPane, runCommand, seedButtons } from './helpers'
+import { PLUGIN, SLOW_MS, SURFACES, TEST_OPTIONS, boot, mountBand, mountPane, runCommand, seedButtons, test } from './helpers'
 
 const TOAST = 'Most of the conversation is hidden; command, attachment and notice lines and the logo stay. Press Show, or type /toolbelt curtain off, to bring it back.'
 const HUMAN_ONLY = 'This can only be changed by typing the command yourself.'

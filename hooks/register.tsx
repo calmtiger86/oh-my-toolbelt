@@ -75,6 +75,7 @@ const curtainState = atom({ plugin: 'oh-my-toolbelt', key: 'curtain' } as const,
 // A count only the prompts tab reads, so bumping it draws the panel again and nothing else: `$.ui.invalidate` would
 // draw every transcript row too, and rows drawn again just after a jump move the viewport.
 const tocMovedState = atom({ plugin: 'oh-my-toolbelt', key: 'tocMoved' } as const, 0)
+const turnRunningState = atom({ plugin: 'oh-my-toolbelt', key: 'turnRunning' } as const, false)
 
 // What this module load knows besides `$.state` (hooks/runtime.ts).
 let runtime = initialRuntime()
@@ -135,6 +136,7 @@ export function engineOf($: EngineInterface): Engine {
       notes: { read: () => read($, notesState), update: change => update($, notesState, change) },
       curtain: { read: () => read($, curtainState), update: change => update($, curtainState, change) },
       tocMoved: { read: () => read($, tocMovedState), update: change => update($, tocMovedState, change) },
+      turnRunning: { read: () => read($, turnRunningState), update: change => update($, turnRunningState, change) },
     },
     store: { get: key => $.store.get(key), set: (key, value) => $.store.set(key, value), delete: key => $.store.delete(key), keys: () => $.store.keys() },
     env: { get: name => envGet($, name) },
@@ -525,6 +527,28 @@ async function runCommand($: EngineInterface, command: string, args: string | un
   return false
 }
 
+// Whether a main-loop turn runs now: the one place a press asks. The turn hooks keep it in `$.state` (toc-hooks.ts),
+// so a reload in the middle of a turn still knows.
+async function isTurnRunning($: EngineInterface): Promise<boolean> {
+  return read($, turnRunningState)
+}
+
+// A command a plugin runs waits for the turn to end, the call unresolved until it has run (`$.command.run`), so a
+// button pressed during a turn says so, and pressed again while its command waits it is not queued twice.
+// A command not installed is refused at once, so it gets that toast alone.
+// ponytail: a press that waited, the turn ended, and was pressed again in the next turn before the first run ended can
+// lose its key to the first run's cleanup; key each wait by a token if that shows up.
+async function runButtonCommand($: EngineInterface, command: string, args: string | undefined): Promise<void> {
+  const known = runtime.knownCommands
+  if (!(await isTurnRunning($)) || (known !== null && !known.includes(command))) return void (await runCommand($, command, args))
+  const key = args === undefined ? command : `${command} ${args}`
+  $.ui.toast(tr()('toast.commandQueued', { command }))
+  if (runtime.waitingCommands.includes(key)) return
+  runtime = { ...runtime, waitingCommands: [...runtime.waitingCommands, key] }
+  await runCommand($, command, args)
+  runtime = { ...runtime, waitingCommands: runtime.waitingCommands.filter(waiting => waiting !== key) }
+}
+
 // A second press of the button that opened a tab closes the panel; from another tab it moves to this one.
 async function togglePane($: EngineInterface, tab: PaneTab): Promise<void> {
   const panes = await attempt($, 'ui.panes', () => $.ui.panes(), [])
@@ -576,7 +600,7 @@ async function runEffect($: EngineInterface, effect: Effect): Promise<void> {
       if (effect.asUser && runtime.options.curtainRestoreOnSubmit === true) await changeCurtain(engineOf($), () => false)
       return
     }
-    case 'command.run': return void (await runCommand($, effect.command, effect.args))
+    case 'command.run': return runButtonCommand($, effect.command, effect.args)
     // The button follows a /voice that ran; one refused goes for this session.
     case 'voice': {
       const ran = await runCommand($, 'voice', effect.next)
@@ -625,7 +649,12 @@ async function pressItem($: EngineInterface, id: string, surface: RenderSurface)
   if (id === FOLD_ID || id === UNFOLD_ID) return void (await setBandFolded(engineOf($), id === FOLD_ID), await storeSet($, FOLDED_KEY, id === FOLD_ID))
   const state = { ...emptySnapshot(), buttons: await read($, buttonsState), layout: await read($, layoutState), pomodoro: await currentPomodoro($), curtain: await isCurtainOn(engineOf($)), themeRow: await readThemeRow(engineOf($)), voice: await read($, voiceState) }
   const ctx = makeCtx(runtime, surface, state, await $.clock.now())
-  await runEffects($, toolForItem(id, ctx)?.onPress?.(ctx, { surface }) ?? [])
+  const effects = toolForItem(id, ctx)?.onPress?.(ctx, { surface }) ?? []
+  const running = runEffects($, effects)
+  // A press that opens the panel holds until it has, so the engine counts the open as the person's and places it at any
+  // width (d.ts UiOpenResult: a Button they worked); other work (a picker, a command that waits for the turn) is let go
+  // and holds no press open.
+  if (effects.some(effect => effect.kind === 'ui.open' || effect.kind === 'ui.toggle')) await running
 }
 
 // True once the changed layout is saved; until then nothing changes.
@@ -864,7 +893,7 @@ export const register: Register = (on, options) => {
     const toc = ctx.state.paneTab === 'toc' ? tocView() : { rows: [], hidden: 0, isElsewhere: false }
     const isStatus = ctx.state.paneTab === 'status'
     const model = {
-      ctx, language: `${runtime.lang.lang} (${runtime.lang.locale})`, versions: runtime.versions, knownCommands: runtime.knownCommands,
+      ctx, language: runtime.lang.locale === runtime.lang.lang ? runtime.lang.lang : `${runtime.lang.lang} (${runtime.lang.locale})`, versions: runtime.versions, knownCommands: runtime.knownCommands,
       settings: isStatus ? await readSettings(engineOf($)) : [], settingsSource: await readSettingsSource(engineOf($)),
       canSelect: e.surface === 'desktop' || (e.surface === 'terminal' && e.viewport?.isFullscreen === true),
       isBandShort: isStatus && !(await read($, bandHiddenState)) && !(await isBandFolded(engineOf($))) && hidesButtonNames(ctx, runtime.bandColumns[e.surface], runtime.knownCommands),
@@ -884,8 +913,13 @@ export const register: Register = (on, options) => {
   // This SessionStart runs after the clear/resume/fork one above, so the session is loaded again (or /clear has emptied the table) first.
   on('classic.SessionStart', async ($, e, next) => readTranscript(engineOf($), e, next, turnsLive)).catch(($, e, next) => (logHookFailure(engineOf($), 'classic.SessionStart transcript', next.error), next(e)))
   on('session.receive', async ($, e, next) => receivePrompt(engineOf($), e, next, turnsLive)).catch(($, e, next) => (logHookFailure(engineOf($), 'session.receive', next.error), next(e)))
-  on('session.append', { door: ['prompt', 'response'] }, async ($, e, next) => appendRow(engineOf($), e, next, turnsLive)).catch(($, e, next) => (logHookFailure(engineOf($), 'session.append', next.error), next(e)))
+  on('session.append', { door: ['prompt', 'command', 'response'] }, async ($, e, next) => appendRow(engineOf($), e, next, turnsLive)).catch(($, e, next) => (logHookFailure(engineOf($), 'session.append', next.error), next(e)))
   on('turn.start', async ($, e, next) => startTurn(engineOf($), e, next, turnsLive)).catch(($, e, next) => (logHookFailure(engineOf($), 'turn.start', next.error), next(e)))
-  on('turn.complete', async ($, e, next) => completeTurn(engineOf($), e, next, turnsLive)).catch(($, e, next) => (logHookFailure(engineOf($), 'turn.complete', next.error), next(e)))
+  // A main-loop turn's end lets go of the command buttons that waited for it (runButtonCommand), so one whose run never
+  // settles holds its button back for one turn at most.
+  on('turn.complete', async ($, e, next) => {
+    if (e.agentId === undefined) runtime = { ...runtime, waitingCommands: [] }
+    return completeTurn(engineOf($), e, next, turnsLive)
+  }).catch(($, e, next) => (logHookFailure(engineOf($), 'turn.complete', next.error), next(e)))
 }
 

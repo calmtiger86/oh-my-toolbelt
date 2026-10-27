@@ -2,7 +2,7 @@
 import { expect, test } from 'claude-code/testing'
 import { translator } from '../hooks/lib/i18n'
 import { parseCommand, replyFor } from '../hooks/tools/command'
-import { CURTAIN_TOAST_MS, curtainEffects, curtainLabel } from '../hooks/tools/curtain'
+import { curtainEffects, curtainLabel } from '../hooks/tools/curtain'
 import { TOOLS } from '../hooks/tools/registry'
 import { makeCtx, t } from './pure-helpers'
 
@@ -30,7 +30,7 @@ test('a picked icon stands for both states; the icon style keeps it alone, and n
 test('raising the curtain sets the state and toasts; lowering it only sets the state', () => {
   const [update, toast, ...rest] = curtainEffects(true, t)
   expect(update?.kind === 'state.update' && update.key === 'curtain' && update.fn(false)).toBe(true)
-  expect(toast).toEqual({ kind: 'ui.toast', text: t('toast.curtainOn'), timeoutMs: CURTAIN_TOAST_MS })
+  expect(toast).toEqual({ kind: 'ui.toast', text: t('toast.curtainOn') })
   expect(rest).toEqual([])
   const lowered = curtainEffects(false, t)
   expect(lowered).toHaveLength(1)

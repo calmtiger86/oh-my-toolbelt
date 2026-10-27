@@ -1,10 +1,10 @@
 // Icons on the toolbelt buttons: the three icon styles in the band, the icon lists of the layout rows and of the form,
 // the shared store key `icons`, and the checks on what is stored.
-import { expect, test } from 'claude-code/testing'
+import { expect } from 'claude-code/testing'
 import type { ButtonConfig } from '../types/index'
 import { cellsOf } from '../hooks/lib/width'
 import { TOC_MARGIN } from '../hooks/toc-tab'
-import { SLOW_MS, SURFACES, TEST_OPTIONS, boot, listOf, mountBand, mountPane, pick, runCommand, seedButtons } from './helpers'
+import { SLOW_MS, SURFACES, TEST_OPTIONS, boot, listOf, mountBand, mountPane, pick, runCommand, seedButtons, test } from './helpers'
 
 type Node = { type?: string; props?: { key?: string; width?: number; label?: string; columnGap?: number; options?: { value: string; label?: string }[]; value?: string }; children?: unknown[] }
 

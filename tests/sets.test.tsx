@@ -1,8 +1,8 @@
 // Button sets: the panel picks the set the band shows, makes a new empty set and shows it, and deletes an empty set
 // other than `default`.
-import { expect, test } from 'claude-code/testing'
+import { expect } from 'claude-code/testing'
 import type { ButtonConfig } from '../types/index'
-import { SURFACES, TEST_OPTIONS, boot, listOf, mountBand, mountPane, pick, seedButtons } from './helpers'
+import { SURFACES, TEST_OPTIONS, boot, listOf, mountBand, mountPane, pick, seedButtons, test } from './helpers'
 
 const buttonsOf = (store: Map<string, unknown>) => store.get('buttons') as ButtonConfig
 

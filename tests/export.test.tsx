@@ -1,8 +1,8 @@
 // The export button and /toolbelt export: the conversation is read and written in the chosen format to the folder the
 // setting names, never over a file that is there, in parts over 4 MiB; a failure toasts.
-import { expect, test } from 'claude-code/testing'
+import { expect } from 'claude-code/testing'
 import type { On, SessionMessage } from 'claude-code'
-import { SURFACES, TEST_OPTIONS, boot, hostless, isSamePath, listOf, mountBand, mountPane, pick, runCommand } from './helpers'
+import { SURFACES, TEST_OPTIONS, boot, hostless, isSamePath, listOf, mountBand, mountPane, pick, runCommand, test } from './helpers'
 import { utf8Bytes } from '../hooks/tools/notes'
 import { browsersOf, fileUrl } from '../hooks/pdf-run'
 
@@ -81,6 +81,18 @@ test('/toolbelt export html writes a safe html file and answers with its path; t
   // Without a format, the last one.
   expect((await runCommand($, 'toolbelt', 'export')).text).toBe(`Conversation saved to /work/${NAME}-2.txt`)
   expect(calls.toasts).toHaveLength(4)
+})
+
+// Regression: an export made while Claude answered lacked the block being written, and nothing said so.
+test('an export made while Claude answers says the answer being written is not in it', { options: SESSION }, async ($, on) => {
+  stubExport(on)
+  on('turn.start', (_, e) => ({ turnId: e.turnId }))
+  on('turn.complete', (_, e) => ({ text: e.answer }))
+  await boot($, on)
+  await $.turn.start({ text: 'write an essay', turnId: 't1' })
+  expect((await runCommand($, 'toolbelt', 'export md')).text).toBe(`Conversation saved to /work/${NAME}.md The answer Claude is still writing is not in it; export again when it ends.`)
+  await $.turn.complete({ answer: 'done', durationMs: 1000, isAborted: false, turnId: 't1', reason: 'answer' })
+  expect((await runCommand($, 'toolbelt', 'export md')).text).toBe(`Conversation saved to /work/${NAME}-2.md`)
 })
 
 test('by default the export goes to Downloads, not the project folder', { options: TEST_OPTIONS }, async ($, on) => {

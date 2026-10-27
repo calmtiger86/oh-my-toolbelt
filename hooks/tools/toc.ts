@@ -50,7 +50,7 @@ export const isTocKind = (kind: string): boolean => kind === 'composer' || kind 
 // Or one the toolbelt's own send button sent as the person's words: a plugin's prompt under this mod's name (`own`,
 // `$.plugin.name`); another plugin's stays out.
 type Origin = { kind: string; name?: unknown; asUser?: unknown }
-const isOwn = (origin: Origin, own: string): boolean => origin.kind === 'plugin' && origin.name === own
+export const isOwn = (origin: Origin, own: string): boolean => origin.kind === 'plugin' && origin.name === own
 // The send button's prompt as session.append hands its row: `asUser`, which a command this mod runs is not. 2.1.310
 // hands this mod its own submit through session.append alone, never its ui.render or prompt.submit hooks.
 export const isOwnPrompt = (origin: Origin, own: string): boolean => isOwn(origin, own) && origin.asUser === true
@@ -59,8 +59,9 @@ export const isTocOrigin = (origin: Origin, own: string): boolean => isTocKind(o
 // A drawn UserMessage row of a person's prompt: not a message someone else sent (`from`: another agent, a teammate,
 // whose row is `unclassified`, another session, a channel) nor a task's notification (`task`). This mod's own rows are
 // judged by name alone, as the transcript file judges them (tools/transcript.ts pluginOf): a command it ran draws the
-// engine's wrapper, which promptOf leaves out. 2.1.310 draws none of them through this mod's own hook as they are
-// sent (session.append lists the send button's); a row drawn again after a resume is not known to differ.
+// engine's wrapper, which promptOf leaves out (session.append lists one Claude answers, toc-live.ts noteCommandRow).
+// 2.1.310 draws none of them through this mod's own hook as they are sent (session.append lists the send button's); a
+// row drawn again after a resume is not known to differ.
 export const isTocRow = (props: { origin: PromptOrigin; from?: unknown; task?: unknown }, own: string): boolean =>
   (isTocKind(props.origin.kind) || isOwn(props.origin, own)) && props.from === undefined && props.task === undefined
 
@@ -96,6 +97,43 @@ export const WRAPPER = /^<(command-|local-command-|bash-|system-reminder|task-no
 export function promptOf(text: string): string | undefined {
   const trimmed = withoutReminders(text).trim()
   const kept = WRAPPER.test(trimmed) || trimmed.startsWith('/') ? '' : promptText(trimmed)
+  return kept === '' ? undefined : kept
+}
+
+// A slash command's own row as the engine stores it and session.append hands it: its name, message and arguments tags
+// alone, in either order (`<command-message>co</command-message>\n<command-name>/co</command-name>`). Read from the
+// front, three tags at most, so any text costs one pass.
+const COMMAND_TAG = /^\s*<(command-name|command-message|command-args)>/
+const COMMAND_TAGS_MAX = 3
+
+function commandTags(text: string): ReadonlyMap<string, string> | undefined {
+  const bodies = new Map<string, string>()
+  let rest = text
+  for (let i = 0; i < COMMAND_TAGS_MAX && rest !== ''; i++) {
+    const open = COMMAND_TAG.exec(rest)
+    const tag = open?.[1]
+    if (open === null || tag === undefined) return undefined
+    const end = rest.indexOf(`</${tag}>`, open[0].length)
+    if (end === -1) return undefined
+    bodies.set(tag, rest.slice(open[0].length, end).trim())
+    rest = rest.slice(end + tag.length + 3)
+  }
+  return rest === '' ? bodies : undefined
+}
+
+// That row as typed, `/name args`, whole; undefined for any other text.
+function commandLine(text: string): string | undefined {
+  const tags = commandTags(withoutReminders(text).trim())
+  const name = tags?.get('command-name') ?? ''
+  return name.startsWith('/') ? `${name} ${tags?.get('command-args') ?? ''}`.trim() : undefined
+}
+
+// That row as the table keeps it, or undefined for any other text. Which command rows are prompts is the caller's to
+// judge: one Claude answers, not one that only acts here (`/model`; tools/transcript.ts userKind, toc-live.ts
+// noteCommandRow).
+export function commandOf(text: string): string | undefined {
+  const line = commandLine(text)
+  const kept = line === undefined ? '' : promptText(line)
   return kept === '' ? undefined : kept
 }
 
@@ -270,7 +308,7 @@ export function pickIndex(move: TocMove, texts: readonly string[], current: numb
 }
 
 // ---- A jump's answer ----
-// The engine's refusal when no row is drawn under the id (a slash command's own row), and where no transcript
+// The engine's refusal when no row is drawn under the id, and where no transcript
 // viewport takes a mod's scroll (the desktop app). Other refusals (a race with another move) leave the row be.
 // Both are strings of the 2.1.309 engine ("nothing drawn under that requestId", "transcript not scrollable here").
 const NOT_DRAWN = /nothing drawn/
@@ -294,11 +332,13 @@ export const ANSWER_CHARS_MAX = 60_000
 export const ANSWER_LINES_MAX = 2000
 export type Answered = { prompt: string; answer: string }
 
-// A message as the table would list it: its prompt (promptOf), or undefined for a tool result, the engine's own rows,
-// a slash command or a reminder alone. The messages carry no ids, so a row's prompt is the message whose prompt is
-// the row's text, as the table kept it.
+// A message as the table would list it: its prompt (promptOf) or slash command (commandOf), or undefined for a tool
+// result, the engine's own rows or a reminder alone. The messages carry no ids, so a row's prompt is the message whose
+// prompt is the row's text, as the table kept it.
+// ponytail: a command that only acts here (`/model`) counts too, so one typed while Claude answers cuts that answer
+// short; the messages do not tell the two apart, the transcript file does (tools/transcript.ts userKind)
 const listedPrompt = (message: SessionMessage): string | undefined =>
-  message.role === 'user' && (message.toolResults ?? []).length === 0 ? promptOf(message.text) : undefined
+  message.role === 'user' && (message.toolResults ?? []).length === 0 ? (promptOf(message.text) ?? commandOf(message.text)) : undefined
 
 // The prompt the table keeps as `text`, the `fromEnd`th of those (from 0) counted from the latest, as the messages hold
 // the latest ones only; and the text Claude wrote after it up to the next prompt the table would list. Null when none.
@@ -309,7 +349,8 @@ export function answerFor(messages: readonly SessionMessage[], text: string, fro
   const after = messages.slice(at + 1)
   const end = after.findIndex(message => listedPrompt(message) !== undefined)
   const said = (end === -1 ? after : after.slice(0, end)).filter(message => message.role === 'assistant' && message.text.trim() !== '')
-  return { prompt: withoutReminders(messages[at]?.text ?? text).trim(), answer: said.map(message => message.text.trim()).join('\n\n') }
+  const asked = messages[at]?.text ?? text
+  return { prompt: commandLine(asked) ?? withoutReminders(asked).trim(), answer: said.map(message => message.text.trim()).join('\n\n') }
 }
 
 // The answer's lines as drawn, cut at ANSWER_CHARS_MAX and ANSWER_LINES_MAX, never inside a surrogate pair; `isCut`

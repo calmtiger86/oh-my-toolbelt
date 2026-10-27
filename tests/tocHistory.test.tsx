@@ -2,13 +2,13 @@
 // prompts sent before, in order and with their turns; a drawn row joins its listed prompt; a file past 4 MiB streams
 // through tail; a failure leaves the drawn rows. The disk and the commands are stubs.
 // Parts ported from oikon48/prompt-rail (MIT): see THIRD_PARTY_NOTICES.md.
-import { expect, test } from 'claude-code/testing'
+import { expect } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { EngineInterface, On, RenderSurface } from 'claude-code'
 import { engineOf } from '../hooks/register'
 import { readRows } from '../hooks/toc-history'
 import { READ_CAP, TAIL_PATH } from '../hooks/tools/transcript'
-import { NOW, PLUGIN, SURFACES, TEST_OPTIONS, boot, hostless, isManifestPath, mountBand, mountPane, runCommand } from './helpers'
+import { NOW, PLUGIN, SURFACES, TEST_OPTIONS, boot, hostless, isManifestPath, mountBand, mountPane, runCommand, test } from './helpers'
 
 const SESSION_ID = '0d6c2f1e-5b7a-4c38-9e21-3f4a5b6c7d8e'
 const FOLDER = '/home/me/.claude/projects/-work'
@@ -294,6 +294,101 @@ test('the prompts tab turned on in the desktop app reads the conversation file a
   expect(disk.reads).toEqual([PATH])
   const pane = await openToc($, 'desktop')
   expect(await labels(pane)).toEqual(['─ 1. first', '─ 2. second', '─ 3. third'])
+  await pane.unmount()
+})
+
+// Regression: a reload in the middle of a turn (new options, a changed file) started the module over as if no turn ran,
+// so a prompt sent before the turn ended was listed once for each of the three ids the engine draws it under (seen in
+// 2.1.310). The desktop app's tab turned on during a turn, with no reload, forgot the same way.
+test('a prompt sent into a turn that ran before the prompts tab came on is listed once', { options: { ...TEST_OPTIONS, tocTab: false } }, async ($, on) => {
+  on('turn.start', (_, e) => ({ turnId: e.turnId }))
+  on('turn.complete', (_, e) => ({ text: e.answer }))
+  const manifest = JSON.stringify({ userConfig: { tocTab: { type: 'boolean', title: 'Prompts tab', default: true } } })
+  stubDisk(on, { [PATH]: FILE }, { manifest })
+  const { clock } = await boot($, on, { isInteractive: false, store: REMEMBERED })
+  await $.session.attach({ surface: 'desktop', clientId: 'desktop:default' })
+  await $.turn.start({ text: 'third', turnId: 't3' })
+  await runCommand($, 'toolbelt', 'status', 'sdk')
+  const status = await mountPane($, 'desktop')
+  await status.press({ key: 'setting-oh-my-toolbelt.tocTab' })
+  await status.unmount()
+  await $.prompt.submit({ text: 'fourth', wait: false, origin: { kind: 'composer' } })
+  for (const n of [11, 12, 13]) {
+    await $.ui.mount({ plugin: PLUGIN, surface: 'desktop', component: 'UserMessage', requestId: id(n), props: { text: 'fourth', origin: { kind: 'composer' as const }, isExpanded: false } })
+    await clock.advance(1000)
+  }
+  await $.turn.complete({ answer: 'done', durationMs: 1000, isAborted: false, turnId: 't3', reason: 'answer' })
+  const pane = await openToc($, 'desktop')
+  expect(await labels(pane)).toEqual(['─ 1. first', '─ 2. second', '─ 3. third', '─ 4. fourth'])
+  await pane.unmount()
+})
+
+// Regression (review M1): reading whether a turn runs after `live` was spread wrote back the copy taken before the read,
+// so a row drawn while the read waited was lost.
+test('a row drawn while the tab reads whether a turn runs is kept', { options: { ...TEST_OPTIONS, tocTab: false } }, async ($, on) => {
+  on('turn.start', (_, e) => ({ turnId: e.turnId }))
+  on('turn.complete', (_, e) => ({ text: e.answer }))
+  let release = (): void => undefined
+  const gate = new Promise<void>(resolve => (release = resolve))
+  let entered = (): void => undefined
+  const inRead = new Promise<void>(resolve => (entered = resolve))
+  let isArmed = false
+  // Above boot's own state stubs, by its matcher.
+  on('state.get', { plugin: 'oh-my-toolbelt', key: 'turnRunning' }, async (_, e, next) => {
+    if (isArmed) {
+      isArmed = false
+      entered()
+      await gate
+    }
+    return next(e)
+  })
+  const manifest = JSON.stringify({ userConfig: { tocTab: { type: 'boolean', title: 'Prompts tab', default: true } } })
+  stubDisk(on, { [PATH]: FILE }, { manifest })
+  await boot($, on, { isInteractive: false, store: REMEMBERED })
+  await $.session.attach({ surface: 'desktop', clientId: 'desktop:default' })
+  await $.turn.start({ text: 'third', turnId: 't3' })
+  await runCommand($, 'toolbelt', 'status', 'sdk')
+  const status = await mountPane($, 'desktop')
+  isArmed = true
+  const pressing = status.press({ key: 'setting-oh-my-toolbelt.tocTab' })
+  await inRead
+  await $.ui.mount({ plugin: PLUGIN, surface: 'desktop', component: 'UserMessage', requestId: id(11), props: { text: 'fourth', origin: { kind: 'composer' as const }, isExpanded: false } })
+  release()
+  await pressing
+  await status.unmount()
+  const pane = await openToc($, 'desktop')
+  expect(await labels(pane)).toEqual(['─ 1. first', '─ 2. second', '─ 3. third', '─ 4. fourth'])
+  await pane.unmount()
+})
+
+// Regression (review L1): another conversation's file empties the table, which forgot that a turn runs, so a prompt sent
+// into it was listed again for each id the engine draws it under.
+test('after /resume, a prompt sent into a turn that ran before the tab came back on is listed once', { options: TEST_OPTIONS }, async ($, on) => {
+  on('turn.start', (_, e) => ({ turnId: e.turnId }))
+  on('turn.complete', (_, e) => ({ text: e.answer }))
+  const other = '1a2b3c4d-0000-4000-8000-00000000000d'
+  const otherPath = `${FOLDER}/${other}.jsonl`
+  const manifest = JSON.stringify({ userConfig: { tocTab: { type: 'boolean', title: 'Prompts tab', default: true } } })
+  stubDisk(on, { [PATH]: FILE, [otherPath]: FILE }, { manifest })
+  const { clock } = await boot($, on, { isInteractive: false, store: REMEMBERED })
+  await $.session.attach({ surface: 'desktop', clientId: 'desktop:default' })
+  await runCommand($, 'toolbelt', 'status', 'sdk')
+  const off = await mountPane($, 'desktop')
+  await off.press({ key: 'setting-oh-my-toolbelt.tocTab' })
+  await off.unmount()
+  await $.classic.SessionStart({ source: 'resume', session_id: other, transcript_path: otherPath })
+  await $.turn.start({ text: 'third', turnId: 't3' })
+  const on2 = await mountPane($, 'desktop')
+  await on2.press({ key: 'setting-oh-my-toolbelt.tocTab' })
+  await on2.unmount()
+  await $.prompt.submit({ text: 'fourth', wait: false, origin: { kind: 'composer' } })
+  for (const n of [11, 12, 13]) {
+    await $.ui.mount({ plugin: PLUGIN, surface: 'desktop', component: 'UserMessage', requestId: id(n), props: { text: 'fourth', origin: { kind: 'composer' as const }, isExpanded: false } })
+    await clock.advance(1000)
+  }
+  await $.turn.complete({ answer: 'done', durationMs: 1000, isAborted: false, turnId: 't3', reason: 'answer' })
+  const pane = await openToc($, 'desktop')
+  expect(await labels(pane)).toEqual(['─ 1. first', '─ 2. second', '─ 3. third', '─ 4. fourth'])
   await pane.unmount()
 })
 

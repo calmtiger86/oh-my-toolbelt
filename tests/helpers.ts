@@ -1,7 +1,7 @@
 // Shared set-up for the hook tests. Not a test file: the runner only loads *.test.ts(x).
 // `boot` registers every stub before the first call on `$`, then fires session.start.
-import { mock } from 'claude-code/testing'
-import type { Engine, MockClock } from 'claude-code/testing'
+import { mock, test as kitTest } from 'claude-code/testing'
+import type { Engine, MockClock, TestOptions, TestRest } from 'claude-code/testing'
 import type { CommandInfo, ConfigRow, On, PaneOpenArgs, RenderSurface, RenderViewport, UiNotifyResult } from 'claude-code'
 import type { ButtonConfig, ToolButton } from '../types/index'
 
@@ -15,6 +15,15 @@ export const TEST_OPTIONS = { clockFormat: '24', timeZone: 'UTC', attachEnabled:
 // The limit for the tests that run the clock through a whole round, or draw hundreds of rows: a CI runner on Linux or
 // Windows runs them four to five times slower than a Mac (measured on the first run), past the kit's 5000 ms.
 export const SLOW_MS = 120_000
+// The limit of an engine test that sets none. The Windows runner timed out a different one past the kit's 5000 ms in
+// each of three runs (5.2 to 7.4 s), so every test that boots the engine takes `test` from here.
+export const TEST_MS = 30_000
+
+export function test(name: string, ...rest: TestRest): void {
+  const options: TestOptions = rest.length === 1 ? {} : rest[0]
+  const body = rest.length === 1 ? rest[0] : rest[1]
+  kitTest(name, { ...options, timeoutMs: options.timeoutMs ?? TEST_MS }, body)
+}
 
 // A fs hook gets its path made absolute on the host (test.md: compare with endsWith): on a Windows runner `/work/a.md`
 // arrives as `D:\work\a.md`, and on a Mac `C:\a.md` as `<repo>/C:\a.md`. Stubs keep and compare paths in one form:

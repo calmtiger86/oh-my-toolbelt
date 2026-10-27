@@ -2,6 +2,22 @@
 
 All notable changes to Oh My Toolbelt are listed here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses [Semantic Versioning](https://semver.org/). Installs update when `version` in `.claude-plugin/plugin.json` goes up.
 
+## [0.1.1] - 2026-10-27
+
+### Fixed
+
+- **Prompts tab**: a prompt that was a slash command alone (`/co`, a skill) was missing from the list, and its turn counted toward the prompt before it. A slash command Claude answers is now listed as you typed it, whether you typed it or one of your buttons ran it; one that only acts in Claude Code (`/model`, `/login`) still is not.
+- **Prompts tab**: a prompt sent while Claude was answering could be listed two or three times when the toolbelt reloaded during that answer (a settings change in any session reloads it). It is listed once.
+- **Attach**: picked files went into the prompt box by their whole path, which shows your user name in a screen recording. A file inside the session's folder now goes in by its relative path and one under your home folder from `~`; Windows keeps whole paths.
+- **Panel**: below 144 columns the Edit and Notes buttons left the panel closed without a word. The toolbelt let go of the press before the panel opened, so Claude Code took the open for one nobody asked for and waited for a wider window. A press now holds until the panel has opened, and it opens at any width, as with `/toolbelt`.
+- **Your buttons**: a command button pressed while Claude was answering seemed to do nothing, as Claude Code runs the command only once the answer ends. A message now says it will run then, and pressing the button again while it waits no longer runs the command twice.
+- **Hide conversation**: the "Most of the conversation is hidden" notice stayed for 8 seconds, so after a quick Show it was still up over the conversation that came back. It now goes after 4 seconds, as other notices do; a notice cannot be taken back sooner.
+- **Clock and date**: with a language picked, the clock, the date, note times and the export's date still followed your computer's locale (English on a Korean computer showed `오전 5:32`). They now follow the language you picked, keeping your computer's regional format when it speaks that language, or when you picked English on a computer in a language the toolbelt has no words for (a German computer keeps `23.10.2026`); with `auto` they follow your computer as before. The time zone is unchanged, and the Status tab shows the date and time locale only when it differs from the language.
+- **Export**: an export made while Claude was answering left out the answer being written, without a word. The message now says so, to export again once the answer ends.
+- **Export**: the notice Claude Code writes when you interrupt an answer (`[Request interrupted by user]`) was exported under your name, as if you had written it. It is left out; a command you typed, such as `/reload-plugins`, is still exported as yours.
+- **Prompts tab**: a turn you interrupted lost its time once the toolbelt read the list back from the session's file (after a resume or a reload), as Claude Code writes no duration for such a turn. Its time now runs from the prompt to the interruption, and the same goes for a turn an API error ended.
+- **Prompts tab**: a prompt you stopped with Esc before Claude wrote anything stayed in the list as a row you could not jump to, though Claude Code had put it back in the prompt box, and after a reload it was gone and the rows after it moved up one number. It now leaves the list at once.
+
 ## [0.1.0] - 2026-10-24
 
 The first public release. Tested by hand on macOS with Claude Code 2.1.309 and 2.1.310, in the terminal and in the desktop app's Code tab; the automatic tests also run on Linux and Windows.

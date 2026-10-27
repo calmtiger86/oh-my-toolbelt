@@ -1,7 +1,7 @@
 {
   "name": "oh-my-toolbelt",
   "displayName": "Oh My Toolbelt",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "A toolbelt above the Claude Code prompt: clock, date, weather and a pomodoro on the left; your saved prompts, commands and one-press actions on the right; a panel for your prompts, notes, clipboard and settings.",
   "author": {"name": "calmtiger86", "url": "https://github.com/calmtiger86"},
   "homepage": "https://github.com/calmtiger86/oh-my-toolbelt",
@@ -14,8 +14,8 @@
   "keywords": ["toolbelt", "toolbar", "productivity", "pomodoro", "clock", "weather", "prompts", "notes", "clipboard", "export"],
   "types": "./types/index.d.ts",
   "userConfig": {
-    "language": {"type": "string", "title": "Language", "description": "Interface language. auto follows your system.", "default": "auto", "options": ["auto", "en", "ko", "ja"]},
-    "clockFormat": {"type": "string", "title": "Clock format", "description": "12 or 24 hours. auto follows your locale.", "default": "auto", "options": ["auto", "12", "24"]},
+    "language": {"type": "string", "title": "Language", "description": "Interface language, which the clock, the date and note times follow too. auto follows your system.", "default": "auto", "options": ["auto", "en", "ko", "ja"]},
+    "clockFormat": {"type": "string", "title": "Clock format", "description": "12 or 24 hours. auto follows the Language setting, or your system's locale when Language is auto or is English on a system in a language the toolbelt has no words for.", "default": "auto", "options": ["auto", "12", "24"]},
     "clockSeconds": {"type": "boolean", "title": "Clock seconds", "description": "Show seconds (redraws every second).", "default": false},
     "dateFormat": {"type": "string", "title": "Date", "description": "The Date tool and its weekday: off (no Date tool), auto (your language's order), year first (2026/10/23), day first (23/10/2026) or month first (10/23/2026).", "default": "auto", "options": ["off", "auto", "ymd", "dmy", "mdy"]},
     "timeZone": {"type": "string", "title": "Time zone", "description": "system uses your computer's time zone.", "default": "system", "options": ["system", "UTC", "Asia/Seoul", "Asia/Tokyo", "Asia/Shanghai", "Asia/Hong_Kong", "Asia/Taipei", "Asia/Singapore", "Asia/Bangkok", "Asia/Ho_Chi_Minh", "Asia/Jakarta", "Asia/Manila", "Asia/Kolkata", "Asia/Karachi", "Asia/Dubai", "Asia/Tehran", "Asia/Jerusalem", "Europe/Istanbul", "Europe/Moscow", "Europe/Kyiv", "Europe/Athens", "Europe/Helsinki", "Europe/Berlin", "Europe/Paris", "Europe/Madrid", "Europe/Rome", "Europe/Amsterdam", "Europe/Stockholm", "Europe/Warsaw", "Europe/London", "Europe/Lisbon", "Atlantic/Reykjavik", "America/Sao_Paulo", "America/Argentina/Buenos_Aires", "America/Santiago", "America/Bogota", "America/Mexico_City", "America/New_York", "America/Toronto", "America/Chicago", "America/Denver", "America/Phoenix", "America/Los_Angeles", "America/Vancouver", "America/Anchorage", "Pacific/Honolulu", "Australia/Perth", "Australia/Adelaide", "Australia/Brisbane", "Australia/Sydney", "Pacific/Auckland", "Africa/Cairo", "Africa/Lagos", "Africa/Nairobi", "Africa/Johannesburg"]},

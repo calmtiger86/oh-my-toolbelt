@@ -1,9 +1,9 @@
 // The theme button and the voice button: the pure rules, and the band on both surfaces.
-import { expect, test } from 'claude-code/testing'
+import { expect } from 'claude-code/testing'
 import type { ConfigRow } from 'claude-code'
 import { otherTheme, themeEffects, themeLabel, themeRowOf } from '../hooks/tools/theme'
 import { voiceEffects, voiceLabel, voiceModeOf, voiceModeToSync } from '../hooks/tools/voice'
-import { COMMANDS, SURFACES, TEST_OPTIONS, boot, mountBand, mountPane, runCommand } from './helpers'
+import { COMMANDS, SURFACES, TEST_OPTIONS, boot, mountBand, mountPane, runCommand, test } from './helpers'
 import { t } from './pure-helpers'
 
 const OPTIONS = ['auto', 'dark', 'light', 'light-daltonized', 'dark-daltonized', 'light-ansi', 'dark-ansi']

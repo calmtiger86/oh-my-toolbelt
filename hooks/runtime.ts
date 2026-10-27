@@ -2,7 +2,7 @@
 // here that calls the engine, `withBandColumns`, takes an `Engine`.
 import type { ConfigRow, ConfigSetResult, ConfigValue, EngineInterface, PluginOptions, RenderSurface, SessionMessage, Timer } from 'claude-code'
 import type { ClipBoard, ExportFormat, Note } from '../types/index'
-import { translator, wordLocale } from './lib/i18n'
+import { translator } from './lib/i18n'
 import type { ResolvedLanguage } from './lib/i18n'
 import type { StoreRead } from './lib/schema'
 import { cellsOf } from './lib/width'
@@ -52,6 +52,8 @@ export type Runtime = {
   bandColumns: Partial<Record<RenderSurface, number>>
   // The status tab's versions, read at start; null where either could not be read.
   versions: Versions | null
+  // The command buttons (`name args`) pressed during this turn whose run has not ended: pressed again, not queued again.
+  waitingCommands: readonly string[]
 }
 
 export type Versions = { toolbelt: string; claudeCode: string }
@@ -90,6 +92,7 @@ export type Engine = {
     notes: Cell<Note[]>
     curtain: Cell<boolean>
     tocMoved: Cell<number>
+    turnRunning: Cell<boolean>
   }
   store: Pick<EngineInterface['store'], 'get' | 'set' | 'delete' | 'keys'>
   env: Pick<EngineInterface['env'], 'get'>
@@ -108,7 +111,7 @@ export type Engine = {
 
 export const initialRuntime = (): Runtime => ({
   options: {}, baseOptions: {}, isActive: false, starting: Promise.resolve(), lang: { lang: 'en', locale: 'en' }, knownCommands: null, isStoreReadOnly: false, ownsAlias: false, timers: [],
-  isFetchingWeather: false, hasWeatherToast: false, hasClockNote: false, bandColumns: {}, versions: null,
+  isFetchingWeather: false, hasWeatherToast: false, hasClockNote: false, bandColumns: {}, versions: null, waitingCommands: [],
 })
 
 // The band's width on `surface` as just drawn. A new one (a resize, the first band after a reload) draws everything
@@ -122,5 +125,5 @@ export function withBandColumns(engine: Engine, known: Runtime['bandColumns'], s
 export const errorText = (err: unknown): string => (err instanceof Error ? err.message : String(err))
 
 export const makeCtx = (runtime: Runtime, surface: RenderSurface, state: Snapshot, now: number): Ctx => ({
-  surface, options: runtime.options, state, t: translator(runtime.lang.lang), now, locale: wordLocale(runtime.lang, runtime.options.language), cells: cellsOf,
+  surface, options: runtime.options, state, t: translator(runtime.lang.lang), now, locale: runtime.lang.locale, cells: cellsOf,
 })

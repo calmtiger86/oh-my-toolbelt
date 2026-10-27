@@ -3,7 +3,7 @@
 import { expect, test } from 'claude-code/testing'
 import type { PromptOrigin } from 'claude-code'
 import { translator } from '../hooks/lib/i18n'
-import { TOC_ROWS_MAX, bandCardText, fileNames, firstLine, isTocOrigin, isTocRow, isTocTabOn, promptOf, promptText, rowKey, tocRows, withPrompt } from '../hooks/tools/toc'
+import { TOC_ROWS_MAX, bandCardText, commandOf, fileNames, firstLine, isTocOrigin, isTocRow, isTocTabOn, promptOf, promptText, rowKey, tocRows, withPrompt } from '../hooks/tools/toc'
 import type { Toc } from '../hooks/tools/toc'
 
 // This mod's name, as `$.plugin.name` gives it.
@@ -98,6 +98,22 @@ test('a prompt is text that is not blank, not the engine\'s wrapper and not a sl
   for (const none of ['', '  \n ', '/usage', '  /Users/me/a.md explain', '<command-name>/model</command-name>', '<bash-input>ls</bash-input>', '<teammate-message teammate_id="r">done</teammate-message>']) {
     expect(promptOf(none)).toBeUndefined()
   }
+})
+
+// A slash command's own row reads as typed, its tags in either order, behind a reminder too; any other text is none.
+test('a slash command\'s row is `/name args`, whatever the order of its tags', () => {
+  expect(commandOf('<command-message>co</command-message>\n<command-name>/co</command-name>')).toBe('/co')
+  expect(commandOf('<command-name>/hs</command-name>\n  <command-message>hs</command-message>\n  <command-args>keep\n\n the files </command-args>')).toBe('/hs keep\nthe files')
+  expect(commandOf('<system-reminder>\nnote\n</system-reminder>\n<command-message>ci</command-message>\n<command-name>/ci</command-name>')).toBe('/ci')
+  for (const none of ['/co', 'Fix the bug', '<command-name>co</command-name>', '<command-name>/co</command-name> and more', '<command-name>/co', '<bash-input>ls</bash-input>', '<local-command-stdout>done</local-command-stdout>']) {
+    expect(commandOf(none)).toBeUndefined()
+  }
+  // A row that does not read as the tags to its end costs one pass, however it repeats them.
+  const started = Date.now()
+  expect(commandOf('<command-args>'.repeat(50_000))).toBeUndefined()
+  expect(commandOf(`<command-name>/co</command-name>${'<command-name>'.repeat(50_000)}`)).toBeUndefined()
+  expect(commandOf('<command-name>/co</command-name>'.repeat(4))).toBeUndefined()
+  expect(Date.now() - started).toBeLessThan(200)
 })
 
 // Regression: a teammate's row is `unclassified`, as an old one is; its `from` tells them apart (d.ts 2.1.309).

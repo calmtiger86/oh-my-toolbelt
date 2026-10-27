@@ -1,10 +1,10 @@
 // The prompts tab's live part: where the person reads, the card a pointer reveals with its turn, the moves of /toolbelt
 // toc, and an agent's transcript beside the panel.
 // Parts ported from oikon48/prompt-rail (MIT): see THIRD_PARTY_NOTICES.md.
-import { expect, test } from 'claude-code/testing'
+import { expect } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
-import type { On, RenderSurface } from 'claude-code'
-import { PLUGIN, SLOW_MS, SURFACES, TEST_OPTIONS, boot, keysOf, mountBand, mountPane, runCommand, seedButtons } from './helpers'
+import type { On, PromptOrigin, RenderSurface } from 'claude-code'
+import { PLUGIN, SLOW_MS, SURFACES, TEST_OPTIONS, boot, keysOf, mountBand, mountPane, runCommand, seedButtons, test } from './helpers'
 
 type Place = { first: number; last: number; of: number } | null
 // On screen from row `first` of the message: 0 is whole at the top, more is cut at the viewport's top.
@@ -156,6 +156,8 @@ test('a pointer on a row reveals its card on the band, not over the list: the pr
   await band.unmount()
 })
 
+// A reply came before the interruption, so the engine keeps the prompt, and so does the list (an Esc before any reply
+// takes it back, below).
 test('an interrupted turn says so, and an agent\'s turn adds nothing to the prompt\'s', { options: TEST_OPTIONS }, async ($, on) => {
   stubTurns(on)
   const { clock } = await boot($, on, { env: { LANG: 'ko_KR.UTF-8' } })
@@ -163,11 +165,70 @@ test('an interrupted turn says so, and an agent\'s turn adds nothing to the prom
   await mountPrompt($, 'u1', 'first')
   await $.turn.start({ text: 'first', turnId: 'main' })
   await turn($, 'sub', 99_000, 'answer', 'ag1')
+  await replied($, 'a1')
   await turn($, 'main', 12_500, 'aborted')
   await clock.advance(300)
-  const band = await mountBand($, 'terminal', 160)
-  expect(textOf(drawnKey(await band.drawn(), 'band-card-toc-1'))).toContain('12초 · 중단됨')
-  await band.unmount()
+  for (const surface of SURFACES) {
+    const pane = await openToc($, surface)
+    expect(await labels(pane)).toEqual(['─ 1. first'])
+    await pane.unmount()
+    const band = await mountBand($, surface, 160)
+    expect(textOf(drawnKey(await band.drawn(), 'band-card-toc-1'))).toContain('12초 · 중단됨')
+    await band.unmount()
+  }
+})
+
+// Regression: a prompt interrupted before any reply stayed listed, its press refused (┄), and a reload, which reads the
+// file that skips it, moved every later number up by one. 2.1.310 takes such a prompt back into the prompt box; the
+// engine's own row then comes by the `note` door and the turn ends `aborted`. A turn no listed prompt started, and an
+// agent's, take nothing back.
+test('a prompt interrupted before any reply leaves the list as the engine takes it back; the later ones keep the numbers a reload gives', { options: TEST_OPTIONS }, async ($, on) => {
+  stubTurns(on)
+  const { clock } = await boot($, on)
+  await sent($, 'u1', 'first')
+  await mountPrompt($, 'u1', 'first')
+  await $.turn.start({ text: 'first', turnId: 't1' })
+  await replied($, 'a1')
+  await turn($, 't1', 5_000)
+  await sent($, 'u2', 'second')
+  const taken = await mountPrompt($, 'u2', 'second')
+  await $.turn.start({ text: 'second', turnId: 't2' })
+  await clock.advance(300)
+  const panes: Pane[] = []
+  for (const surface of SURFACES) panes.push(await openToc($, surface))
+  for (const pane of panes) expect(await labels(pane)).toEqual(['─ 1. first', '─ 2. second'])
+  await $.session.append({ door: 'note', uuid: 'n2', origin: { kind: 'engine' }, message: { type: 'user', role: 'user', content: [{ type: 'text', text: '[Request interrupted by user]' }] } })
+  await turn($, 't2', 5_302, 'aborted')
+  // Drawn again at once, the panels open.
+  for (const pane of panes) expect(await labels(pane)).toEqual(['─ 1. first'])
+  // A late drawing of its row lists it no more.
+  await taken.redraw(prompt('second'))
+  await taken.unmount()
+  // Another plugin's prompt interrupted before any reply: no listed prompt's turn, so nothing leaves.
+  const other = { kind: 'plugin' as const, name: 'other', asUser: true as const }
+  await $.session.append({ door: 'prompt', uuid: 'u3', origin: other, message: { type: 'user', role: 'user', content: [{ type: 'text', text: 'From another plugin' }] } })
+  await $.turn.start({ text: 'From another plugin', turnId: 't3' })
+  await turn($, 't3', 1_000, 'aborted')
+  // The words sent again, and an agent interrupted inside that turn before the turn's first reply.
+  await sent($, 'u4', 'second, again')
+  await mountPrompt($, 'u4', 'second, again')
+  await $.turn.start({ text: 'second, again', turnId: 't4' })
+  await turn($, 'sub', 2_000, 'aborted', 'ag1')
+  await replied($, 'a4')
+  await turn($, 't4', 4_000)
+  await clock.advance(300)
+  for (const pane of panes) {
+    expect(await labels(pane)).toEqual(['─ 1. first', '─ 2. second, again'])
+    await pane.unmount()
+  }
+  for (const surface of SURFACES) {
+    const band = await mountBand($, surface, 160)
+    const drawn = await band.drawn()
+    expect(textOf(drawnKey(drawn, 'band-card-toc-1'))).toContain('#1 first · 5s')
+    expect(textOf(drawnKey(drawn, 'band-card-toc-2'))).toContain('#2 second, again · 4s')
+    expect(drawnKey(drawn, 'band-card-toc-3')).toBeUndefined()
+    await band.unmount()
+  }
 })
 
 // Regression: a prompt the toolbelt's own send button sent was missing from the tab, and its turn's tools and time went
@@ -210,6 +271,74 @@ test('a prompt the send button sent is listed from session.append alone, with it
   expect(textOf(drawnKey(drawn, 'band-card-toc-2'))).toContain('#2 Write the commit message. · 1m 23s · Tools: 1')
   expect(textOf(drawnKey(drawn, 'band-card-toc-2'))).not.toContain('2m')
   await shown.unmount()
+})
+
+// Regression: a prompt that was a slash command alone (`/co`, a skill) was missing from the tab, and its turn's tools
+// and time went to the prompt before it. 2.1.310 draws only the composer's placeholder of it, raises prompt.submit with
+// the command, then appends its row by the `command` door; a command that only acts here (`/model`) raises no
+// prompt.submit. One this mod's button ran is listed as one typed is; another plugin's is not.
+test('a slash command Claude answers is listed from its appended row, with its own turn; one that only acts here and another plugin\'s are not', { options: TEST_OPTIONS }, async ($, on) => {
+  stubTurns(on)
+  const { clock } = await boot($, on)
+  const ran = (name: string, args: string, origin: PromptOrigin) => $.prompt.submit({ text: `/${name} ${args}`.trim(), wait: false, origin, command: { name, args } })
+  const commandRow = (uuid: string, text: string, origin: PromptOrigin) =>
+    $.session.append({ door: 'command', uuid, origin, message: { type: 'user', role: 'user', content: [{ type: 'text', text }] } })
+  await sent($, 'u1', 'first')
+  await mountPrompt($, 'u1', 'first')
+  await mountPrompt($, 'placeholder', '/co today')
+  await ran('co', 'today', { kind: 'composer' })
+  await commandRow('u2', '<command-message>co</command-message>\n<command-name>/co</command-name>\n<command-args>today</command-args>', { kind: 'composer' })
+  await $.turn.start({ text: '/co today', turnId: 't2' })
+  await replied($, 'a2', [{ id: 'k1', name: 'Write', path: '/p/MEMORY.md' }])
+  await turn($, 't2', 30_000)
+  await commandRow('u3', '<command-name>/model</command-name>\n            <command-message>model</command-message>\n            <command-args></command-args>', { kind: 'unclassified' })
+  const own = { kind: 'plugin', name: PLUGIN } as PromptOrigin
+  await ran('ci', '', own)
+  await commandRow('u4', '<command-message>ci</command-message>\n<command-name>/ci</command-name>', own)
+  const other = { kind: 'plugin', name: 'other' } as PromptOrigin
+  await ran('review', '', other)
+  await commandRow('u5', '<command-message>review</command-message>\n<command-name>/review</command-name>', other)
+  await clock.advance(300)
+  const pane = await openToc($)
+  expect(await labels(pane)).toEqual(['─ 1. first', '─ 2. /co today', '─ 3. /ci'])
+  // A press jumps to the command's stored row, which 2.1.310 reveals.
+  expect((await pane.findAll({ type: 'Button' })).some(b => b.key === 'toc-u2')).toBe(true)
+  await pane.unmount()
+  const band = await mountBand($, 'terminal', 160)
+  const drawn = await band.drawn()
+  expect(textOf(drawnKey(drawn, 'band-card-toc-1'))).not.toContain('Tools')
+  expect(textOf(drawnKey(drawn, 'band-card-toc-2'))).toContain('#2 /co today · 30s · Tools: 1')
+  await band.unmount()
+})
+
+// Regression (review): the mark prompt.submit left went to whichever command row came next. A command row is listed
+// only when it is the command prompt.submit ran, from the person or this mod: not after a command whose row never came
+// (refused), not another plugin's, not a command this mod's button ran that only acts here (/voice). A row the person
+// does not see (`isMeta`) takes nothing, even one that reads as the command.
+test('a command row is listed only when it is the command prompt.submit ran, from the person or this mod', { options: TEST_OPTIONS }, async ($, on) => {
+  stubTurns(on)
+  const { clock } = await boot($, on)
+  const ran = (name: string, origin: PromptOrigin) => $.prompt.submit({ text: `/${name}`, wait: false, origin, command: { name, args: '' } })
+  const commandRow = (uuid: string, name: string, origin: PromptOrigin) =>
+    $.session.append({ door: 'command', uuid, origin, message: { type: 'user', role: 'user', content: [{ type: 'text', text: `<command-message>${name}</command-message>\n<command-name>/${name}</command-name>` }] } })
+  const own = { kind: 'plugin', name: PLUGIN } as PromptOrigin
+  // /co was refused, so no row of it comes; /model's row comes next.
+  await ran('co', { kind: 'composer' })
+  await commandRow('u1', 'model', { kind: 'unclassified' })
+  // /ci ran; another plugin's /review row comes before /ci's own.
+  await ran('ci', { kind: 'composer' })
+  await commandRow('u2', 'review', { kind: 'plugin', name: 'other' } as PromptOrigin)
+  await commandRow('u3', 'ci', { kind: 'composer' })
+  // The button ran /voice, which only acts here: no prompt.submit, its row under this mod's name.
+  await commandRow('u4', 'voice', own)
+  // The button ran /co: a row of the engine's own by the same door first (a local command's caveat), then its row.
+  await ran('co', own)
+  await $.session.append({ door: 'command', uuid: 'u5', origin: own, message: { type: 'user', role: 'user', isMeta: true, content: [{ type: 'text', text: '<command-message>co</command-message>\n<command-name>/co</command-name>' }] } })
+  await commandRow('u6', 'co', own)
+  await clock.advance(300)
+  const pane = await openToc($)
+  expect(await labels(pane)).toEqual(['─ 1. /ci', '─ 2. /co'])
+  await pane.unmount()
 })
 
 // The send button's prompt listed from session.append stays one entry when its row is drawn too, under the same id:

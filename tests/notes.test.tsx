@@ -1,9 +1,9 @@
 // The notes tab: the field saves a note, the list shows the newest first with Insert and Delete, the store is shared by
 // every session and is read again just before each write, and the `n` button toggles the tab.
-import { expect, test } from 'claude-code/testing'
+import { expect } from 'claude-code/testing'
 import type { Note } from '../types/index'
 import { cellsOf } from '../hooks/lib/width'
-import { NOW, SLOW_MS, SURFACES, TEST_OPTIONS, boot, mountBand, mountPane, runCommand } from './helpers'
+import { NOW, SLOW_MS, SURFACES, TEST_OPTIONS, boot, mountBand, mountPane, runCommand, test } from './helpers'
 
 type Pane = Awaited<ReturnType<typeof mountPane>>
 
