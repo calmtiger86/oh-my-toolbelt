@@ -1,7 +1,7 @@
 {
   "name": "oh-my-toolbelt",
   "displayName": "Oh My Toolbelt",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "A toolbelt above the Claude Code prompt: clock, date, weather and a pomodoro on the left; your saved prompts, commands and one-press actions on the right; a panel for your prompts, notes, clipboard and settings.",
   "author": {"name": "calmtiger86", "url": "https://github.com/calmtiger86"},
   "homepage": "https://github.com/calmtiger86/oh-my-toolbelt",

@@ -5,7 +5,7 @@ import type { TFn } from './i18n'
 import { escapeHtml, markdownToHtml } from './markdown'
 import { stripControls } from './schema'
 import { utf8Bytes } from '../tools/notes'
-import { withoutReminders } from '../tools/toc'
+import { withoutPasteTags, withoutReminders } from '../tools/toc'
 
 export type { ExportFormat }
 // The order the status tab lists them; md is the first choice. pdf is the html page printed by a browser (pdf-run.ts).
@@ -91,13 +91,14 @@ function engineTags(text: string): ReadonlyMap<string, string> | null {
 // words`), bash mode's input `! ls`, a teammate's message its words. A row of the engine's own (a command's or bash
 // mode's output, a notification, the notice of an interruption) is no one's words: null, and any row with an output tag
 // in it is one, as output that prints the tags can read as a command. So is a row that starts with one of its tags but
-// does not read as them: it may be output, and the export keeps out what it cannot tell apart.
+// does not read as them: it may be output, and the export keeps out what it cannot tell apart. A paste is kept as the
+// prompt box held it, its tags gone only once the row is judged, so a paste that starts with a tag stays the person's.
 function userText(text: string): string | null {
   const typed = cleanText(withoutReminders(text)).trim()
   if (INTERRUPTED_ROW.test(typed)) return null
   const tags = typed === '' ? null : engineTags(typed)
   if (tags === null && isEngineTag(LEADING_TAG.exec(typed)?.[1] ?? '')) return null
-  if (tags === null) return TEAMMATE_ROW.exec(typed)?.[1]?.trim() ?? typed
+  if (tags === null) return TEAMMATE_ROW.exec(typed)?.[1]?.trim() ?? withoutPasteTags(typed).trim()
   if ([...tags.keys()].some(tag => OUTPUT_TAGS.has(tag))) return null
   const name = tags.get('command-name')
   if (name !== undefined) return `${name} ${tags.get('command-args') ?? ''}`.trim()

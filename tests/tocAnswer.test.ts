@@ -26,6 +26,15 @@ test('the same prompt sent twice is counted from the latest, as the messages hol
   expect(answerFor(TALK, 'run the tests', 2)).toBeNull()
 })
 
+// Regression: an opened prompt that held a paste showed, and put in the prompt box, the engine's paste tags.
+test('a prompt with a paste is found by its listed text and comes back as the prompt box held it', () => {
+  const asked = 'Fix this:\n\n\n\n<pasted_content id="1556">\nTypeError: x\nat y\n</pasted_content id="1556">\n\nthen test'
+  const talk = [said('user', asked), said('assistant', 'Fixed.')]
+  expect(answerFor(talk, promptText(asked), 0)).toEqual({ prompt: 'Fix this:\n\nTypeError: x\nat y\nthen test', answer: 'Fixed.' })
+  const only = '\n\n<pasted_content id="cc96">\nRead the brief.\n</pasted_content id="cc96">\n'
+  expect(answerFor([said('user', only), said('assistant', 'Read.')], promptText(only), 0)?.prompt).toBe('Read the brief.')
+})
+
 // Regression: a prompt that was a slash command alone was not listed, so the desktop app could not open its answer.
 test('a slash command\'s answer is found by `/name args`, and its prompt comes back as typed', () => {
   const talk = [said('user', '<command-message>co</command-message>\n<command-name>/co</command-name>\n<command-args>today</command-args>'), said('assistant', 'Saved.'), said('user', 'next'), said('assistant', 'Next.')]

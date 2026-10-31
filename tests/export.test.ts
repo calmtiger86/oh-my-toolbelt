@@ -85,6 +85,15 @@ test('rows with no text and no tool use are left out, and rows of one role in a 
   expect(exportParts([result(), user(' ')], 'md', meta())).toEqual([])
 })
 
+// Regression: a prompt that held a paste was exported with the engine's `<pasted_content>` lines around it.
+test('a person\'s paste is exported as the prompt box held it, even one that starts with an engine tag', () => {
+  const pasted = (body: string) => `See this:\n\n\n\n<pasted_content id="cc96">\n${body}\n</pasted_content id="cc96">\n`
+  expect(said(turnsOf([user(pasted('TypeError: x')), user(pasted('<bash-stdout>ls</bash-stdout>'))]))).toEqual([
+    ['user', ['See this:\n\nTypeError: x', 'See this:\n\n<bash-stdout>ls</bash-stdout>']],
+  ])
+  expect(exportParts([user(`\n\n<pasted_content id="cc96">\nRead the brief.\n</pasted_content id="cc96">\n`)], 'md', meta())[0]).not.toContain('pasted_content')
+})
+
 // Security: what the engine put into a person's row (CLAUDE.md or memory in a reminder) is not the person's to share; a
 // reply that quotes such a tag is Claude's words and stays.
 test('a person\'s row loses the engine\'s reminder ahead of it, and a reply that quotes the tag keeps it', () => {

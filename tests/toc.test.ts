@@ -3,7 +3,7 @@
 import { expect, test } from 'claude-code/testing'
 import type { PromptOrigin } from 'claude-code'
 import { translator } from '../hooks/lib/i18n'
-import { TOC_ROWS_MAX, bandCardText, commandOf, fileNames, firstLine, isTocOrigin, isTocRow, isTocTabOn, promptOf, promptText, rowKey, tocRows, withPrompt } from '../hooks/tools/toc'
+import { TOC_ROWS_MAX, bandCardText, commandOf, fileNames, firstLine, isTocOrigin, isTocRow, isTocTabOn, promptOf, promptText, rowKey, tocRows, withPrompt, withoutPasteTags } from '../hooks/tools/toc'
 import type { Toc } from '../hooks/tools/toc'
 
 // This mod's name, as `$.plugin.name` gives it.
@@ -98,6 +98,27 @@ test('a prompt is text that is not blank, not the engine\'s wrapper and not a sl
   for (const none of ['', '  \n ', '/usage', '  /Users/me/a.md explain', '<command-name>/model</command-name>', '<bash-input>ls</bash-input>', '<teammate-message teammate_id="r">done</teammate-message>']) {
     expect(promptOf(none)).toBeUndefined()
   }
+})
+
+// A pasted block's tags are the engine's: a prompt that opens with one was listed as `<pasted_content id="cc96">`.
+test('a pasted block is kept without the tags around it', () => {
+  expect(promptOf('\n\n<pasted_content id="cc96">\nRead the brief first.\nThen start.\n</pasted_content id="cc96">\n')).toBe('Read the brief first.\nThen start.')
+  expect(promptOf('Fix this:\n\n\n\n<pasted_content id="1556">\nTypeError: x\n</pasted_content id="1556">')).toBe('Fix this:\nTypeError: x')
+  expect(promptOf('<pasted_content>\nold form\n</pasted_content>')).toBe('old form')
+  expect(promptOf('<pasted_content id="cc96">\n</pasted_content id="cc96">')).toBeUndefined()
+  expect(promptOf('say <pasted_content> here')).toBe('say <pasted_content> here')
+})
+
+// Only the engine's pair goes: tags the person typed or pasted as text stay, with the lines around them apart.
+test('a lone paste tag, another tag, a pair of two ids or a pair typed inside the text stays', () => {
+  const kept = (text: string) => expect(withoutPasteTags(text)).toBe(text)
+  kept('Please explain:\n</pasted_content id="cc96">\nhello')
+  kept('Please explain:\n<pasted_content-example>\nhello\n</pasted_content-example>')
+  kept('\n\n<pasted_content id="cc96">\nhello\n</pasted_content id="0702">\n')
+  kept('I pasted:\n<pasted_content id="x">\nhello\n</pasted_content id="x">\nthanks')
+  // Two pastes of one prompt share the session's id; each pair goes on its own.
+  const paste = (body: string) => `\n\n<pasted_content id="cc96">\n${body}\n</pasted_content id="cc96">\n`
+  expect(withoutPasteTags(`A\n\n${paste('one')}\nB\n\n${paste('two')}`)).toBe('A\n\none\nB\n\ntwo')
 })
 
 // A slash command's own row reads as typed, its tags in either order, behind a reminder too; any other text is none.

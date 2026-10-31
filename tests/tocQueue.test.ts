@@ -25,6 +25,16 @@ test('a prompt delivered into the running turn is one row, which jumps to the ro
   expect([...restQueue(read.queue).pending]).toEqual([])
 })
 
+// A paste's tags come with no blank lines around in the queue's text and with them in the row: one entry all the same.
+test('a paste sent into the running turn is one row, its text without the tags', () => {
+  const brief = 'Read the brief.\nThen start.'
+  const sent = noteSent(typed(start(), 1, 'first'), `<pasted_content id="cc96">\n${brief}\n</pasted_content id="cc96">`, 1000, true)
+  const row = `\n\n<pasted_content id="cc96">\n${brief}\n</pasted_content id="cc96">\n`
+  const read = noteDrawn(noteDrawn(sent, 'queued-preview', row, 1010, true), id(2), row, 1000 + LATELY_MS + 1, true)
+  expect(rows(read)).toEqual([[id(1).slice(0, 24), id(1)], ['queued-preview', id(2)]])
+  expect(read.toc.get('queued-preview')?.text).toBe(brief)
+})
+
 test('a queued prompt\'s first row drawn just before it is sent is its own; one drawn long before is not', () => {
   const first = typed(start(), 1, 'first')
   const early = noteDrawn(noteDrawn(first, 'preview-a', 'second', 1000, true), 'preview-b', 'second', 1100, true)

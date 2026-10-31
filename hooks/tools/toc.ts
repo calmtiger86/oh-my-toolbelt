@@ -77,14 +77,24 @@ const bounded = (text: string, max: number): string => Array.from(text).slice(0,
 // The first line with text, on one line and bounded; '' for a prompt that is all blank.
 export const firstLine = (text: string): string => bounded(cleanLines(text).find(line => line !== '') ?? '', LINE_CHARS_MAX)
 
-// The prompt as the table keeps it: its lines with text, bounded.
 // What a host puts ahead of the typed text: a reminder (the desktop app's note on the first prompt of a session started
 // without a project folder, which once kept that prompt out of the tab) or an open artifact's view state. The text
 // after it is the prompt.
 const PREAMBLE = /^\s*(?:(?:<system-reminder>[\s\S]*?<\/system-reminder>|<artifact-view-context\b[^>]*>[\s\S]*?<\/artifact-view-context>)\s*)+/
 export const withoutReminders = (text: string): string => text.replace(PREAMBLE, '')
 
-export const promptText = (text: string): string => bounded(cleanLines(withoutReminders(text)).filter(line => line !== '').join('\n'), TEXT_CHARS_MAX)
+// A pasted block as the engine stores it in the transcript files sampled (2.1.294 to 2.1.316): `\n\n<pasted_content
+// id="cc96">\n` + the paste + `\n</pasted_content id="cc96">\n`, or with no id; a queued prompt's row holds it with no
+// blank lines around, at the text's start and end. A slash command's arguments hold a paste untagged. Only such a pair
+// is taken, opened at the text's start or after a blank line and closed with the same id: a lone tag, or one typed
+// inside a line, stays. The tags are not the person's words: a prompt that opens with a paste was listed by them.
+// ponytail: a pair typed after a blank line is taken for a paste too; the stored text tells the two apart no other way
+const PASTE = /(?:\n\n|(?<![\s\S]))<pasted_content( id="[^"\n]*")?>\n(?:([\s\S]*?)\n)?<\/pasted_content\1>(?:\n|(?![\s\S]))/g
+// The text with each paste's tags gone and the paste where its placeholder was typed, as the prompt box held it.
+export const withoutPasteTags = (text: string): string => text.replace(PASTE, '$2')
+// The prompt as the table keeps it: its lines with text, bounded.
+export const promptText = (text: string): string =>
+  bounded(cleanLines(withoutPasteTags(withoutReminders(text))).filter(line => line !== '').join('\n'), TEXT_CHARS_MAX)
 
 // User rows the engine writes around its own output (slash commands, bash mode, reminders) or another party's words
 // (a teammate's), which are not prompts. An export reads them closer, as they hold what the person typed
@@ -350,7 +360,7 @@ export function answerFor(messages: readonly SessionMessage[], text: string, fro
   const end = after.findIndex(message => listedPrompt(message) !== undefined)
   const said = (end === -1 ? after : after.slice(0, end)).filter(message => message.role === 'assistant' && message.text.trim() !== '')
   const asked = messages[at]?.text ?? text
-  return { prompt: commandLine(asked) ?? withoutReminders(asked).trim(), answer: said.map(message => message.text.trim()).join('\n\n') }
+  return { prompt: commandLine(asked) ?? withoutPasteTags(withoutReminders(asked)).trim(), answer: said.map(message => message.text.trim()).join('\n\n') }
 }
 
 // The answer's lines as drawn, cut at ANSWER_CHARS_MAX and ANSWER_LINES_MAX, never inside a surrogate pair; `isCut`

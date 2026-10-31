@@ -2,6 +2,14 @@
 
 All notable changes to Oh My Toolbelt are listed here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses [Semantic Versioning](https://semver.org/). Installs update when `version` in `.claude-plugin/plugin.json` goes up.
 
+## [0.1.2] - 2026-10-31
+
+### Fixed
+
+- **Prompts tab**: a prompt that started with pasted text was listed as `<pasted_content id="…">`, the tag Claude Code stores around a paste, so different prompts showed the same line. It is now listed, and shown on its card over the toolbelt, by its first line of text.
+- **Prompts tab** (desktop app): an opened prompt that held pasted text showed those tags, and Put in the prompt box put them in the box. It now comes back as the prompt box held it.
+- **Export**: pasted text was exported between those tags. It is exported as you pasted it; tags you typed yourself are kept.
+
 ## [0.1.1] - 2026-10-27
 
 ### Fixed
