@@ -2,6 +2,12 @@
 
 All notable changes to Oh My Toolbelt are listed here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses [Semantic Versioning](https://semver.org/). Installs update when `version` in `.claude-plugin/plugin.json` goes up.
 
+## [0.1.3] - 2026-10-31
+
+### Fixed
+
+- **Clock and date**: with Claude Code 2.1.316 on Linux and Windows, the Korean date read `2026/10/22` instead of `2026. 10. 22.`. It keeps its Korean form there too.
+
 ## [0.1.2] - 2026-10-31
 
 ### Fixed

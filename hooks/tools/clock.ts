@@ -76,11 +76,17 @@ function formatDate(nowMs: number, format: DateFormat, locale: string, timeZone:
     const weekday = new Intl.DateTimeFormat(locale, { weekday: 'short', ...zone }).format(nowMs)
     // The Gregorian year in Western digits whatever the locale's calendar.
     const digits = { year: 'numeric', month: '2-digit', day: '2-digit', calendar: 'gregory', numberingSystem: 'latn', ...zone } as const
-    if (format === 'auto') return { date: new Intl.DateTimeFormat(locale, digits).format(nowMs), weekday }
+    if (format === 'auto') {
+      const local = new Intl.DateTimeFormat(locale, digits)
+      // Korean is put together as Intl wrote it (`2026. 10. 22.`, 2.1.309 everywhere and 2.1.316 on macOS): 2.1.316 on
+      // Linux and Windows writes `2026/10/22`, whatever the options (CI, 2026-10-31).
+      if (new Intl.Locale(local.resolvedOptions().locale).language !== 'ko') return { date: local.format(nowMs), weekday }
+    }
     const parts = new Intl.DateTimeFormat('en-US', digits).formatToParts(nowMs)
     const part = (type: Intl.DateTimeFormatPartTypes): string => parts.find(p => p.type === type)?.value ?? ''
     const [y, m, d] = [part('year'), part('month'), part('day')]
-    return { date: format === 'ymd' ? `${y}/${m}/${d}` : format === 'dmy' ? `${d}/${m}/${y}` : `${m}/${d}/${y}`, weekday }
+    const date = format === 'auto' ? `${y}. ${m}. ${d}.` : format === 'ymd' ? `${y}/${m}/${d}` : format === 'dmy' ? `${d}/${m}/${y}` : `${m}/${d}/${y}`
+    return { date, weekday }
   } catch {
     return null
   }

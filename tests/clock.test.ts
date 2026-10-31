@@ -63,6 +63,9 @@ test('the date: off, the language\'s own order, or the year, day or month first,
   expect(dateText(late, 'mdy', 'ja-JP', 'UTC')).toBe('10/22/2026 木')
   expect(dateText(late, 'auto', 'en-US', 'UTC')).toBe('10/22/2026 Thu')
   expect(dateText(late, 'auto', 'ja-JP', 'UTC')).toBe('2026/10/22 木')
+  // Regression: 2.1.316 on Linux and Windows wrote Korean as `2026/10/22`; it keeps its own form, months padded.
+  expect(dateText(late, 'auto', 'ko-KR', 'Asia/Seoul')).toBe('2026. 10. 23. 금')
+  expect(dateText(Date.UTC(2026, 0, 4, 23, 0), 'auto', 'ko', 'Asia/Seoul')).toBe('2026. 01. 05. 월')
   // A zone Intl does not know draws no date; the clock reports it.
   expect(dateText(late, 'ymd', 'en-US', 'Mars/Base')).toBe('')
   // A value outside the list reads as the schema's default.
