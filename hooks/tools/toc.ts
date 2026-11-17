@@ -61,9 +61,28 @@ export const isTocOrigin = (origin: Origin, own: string): boolean => isTocKind(o
 // judged by name alone, as the transcript file judges them (tools/transcript.ts pluginOf): a command it ran draws the
 // engine's wrapper, which promptOf leaves out (session.append lists one Claude answers, toc-live.ts noteCommandRow).
 // 2.1.310 draws none of them through this mod's own hook as they are sent (session.append lists the send button's); a
-// row drawn again after a resume is not known to differ.
-export const isTocRow = (props: { origin: PromptOrigin; from?: unknown; task?: unknown }, own: string): boolean =>
-  (isTocKind(props.origin.kind) || isOwn(props.origin, own)) && props.from === undefined && props.task === undefined
+// row drawn again after a resume is not known to differ. Nor an `unclassified` row that opens with an agent team
+// notice, which can come with no `from` (opensWithNotice).
+export const isTocRow = (props: { origin: PromptOrigin; from?: unknown; task?: unknown; text?: string }, own: string): boolean =>
+  (isTocKind(props.origin.kind) || isOwn(props.origin, own)) && props.from === undefined && props.task === undefined &&
+  !(props.origin.kind === 'unclassified' && opensWithNotice(props.text ?? ''))
+
+// Whether a drawn row opens with an agent team notice: its first block, up to a blank line, is a JSON object with a
+// string `type`. A row of another session's messages joins their bodies with a blank line between; one that opens with
+// a teammate gone idle (`idle_notification`) was drawn `unclassified` with no `from` and listed as that JSON (2.1.326,
+// a resumed session's rows). Only `idle_notification` has been seen in a row; the 2.1.326 binary builds other kinds
+// too (`shutdown_request`, `plan_approval_response`, `permission_request`, `task_assignment`), so any `type` counts.
+function opensWithNotice(text: string): boolean {
+  const first = (text.trim().split(/\r?\n[ \t]*\r?\n/, 1)[0] ?? '').trim()
+  if (!first.startsWith('{') || !first.endsWith('}')) return false
+  try {
+    const value: unknown = JSON.parse(first)
+    return typeof value === 'object' && value !== null && typeof (value as { type?: unknown }).type === 'string'
+  } catch {
+    // Braces around text that is no JSON are the person's words.
+    return false
+  }
+}
 
 // On unless the person turned it off; an options object that lacks the field counts as on.
 export const isTocTabOn = (options: Readonly<Record<string, unknown>>): boolean => options.tocTab !== false
@@ -100,13 +119,17 @@ export const promptText = (text: string): string =>
 // (a teammate's), which are not prompts. An export reads them closer, as they hold what the person typed
 // (lib/export.ts).
 export const WRAPPER = /^<(command-|local-command-|bash-|system-reminder|task-notification|user-prompt-submit-hook|teammate-message)/
+// The line the transcript file stores ahead of another session's message, its wrapper on the next line (2.1.326). A
+// drawn row shows the message without it (isTocRow judges those).
+const PEER_LINE = /^Another Claude session sent a message:[ \t]*\n/
 
-// A prompt as the table keeps it, or undefined for a row that is none: blank, the engine's wrapper, or a slash
-// command (any text starting with `/`). The transcript file and the drawn rows judge alike, so a reload numbers the
-// prompts as they were.
+// A prompt as the table keeps it, or undefined for a row that is none: blank, the engine's wrapper (behind the line it
+// stores ahead of another session's message too), or a slash command (any text starting with `/`). The transcript
+// file and the drawn rows judge alike, so a reload numbers the prompts as they were.
 export function promptOf(text: string): string | undefined {
   const trimmed = withoutReminders(text).trim()
-  const kept = WRAPPER.test(trimmed) || trimmed.startsWith('/') ? '' : promptText(trimmed)
+  const isNone = WRAPPER.test(trimmed.replace(PEER_LINE, '')) || trimmed.startsWith('/')
+  const kept = isNone ? '' : promptText(trimmed)
   return kept === '' ? undefined : kept
 }
 

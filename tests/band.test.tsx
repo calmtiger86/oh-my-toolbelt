@@ -117,16 +117,30 @@ test('the band draws the layout the person chose', { options: TEST_OPTIONS }, as
   }
 })
 
-test('another mod draws below ours, one row shorter, and its failure leaves ours alone', { options: TEST_OPTIONS }, async ($, on) => {
+test('another mod draws below ours: one row shorter before 2.1.323, stacked by the engine from then on', { options: TEST_OPTIONS }, async ($, on) => {
   const { calls } = await boot($, on)
+  // What the other mod hears tells the engines apart without our own code deciding it: from 2.1.323 the engine asks
+  // its plugin for a row directly, so it hears a plugin's name; before, it is reached only through our `next`, none.
+  // The survey scene makes our hook pass the event on as it came, which is the one way an older engine reaches it.
+  await (await mountBand($, 'terminal', 119, { hasSurvey: true })).unmount()
+  const isStacked = calls.belowPlugins[0] !== undefined
   for (const surface of SURFACES) {
     const ui = await mountBand($, surface, 119)
     const drawn = await ui.drawn()
-    expect(keysOf(drawn).slice(0, 2)).toEqual(['band', 'band-row'])
-    expect(JSON.stringify((drawn as { children?: unknown[] }).children?.[1])).toContain('engine')
+    const [first, second] = (drawn as { children?: unknown[] }).children ?? []
+    if (isStacked) {
+      // The engine puts the other mod's row below ours, so ours is alone: the row itself on a terminal, the `band` box
+      // holding only the row on a desktop.
+      if (surface === 'terminal') expect(keysOf(first)[0]).toBe('band-row')
+      else expect((first as { children?: { props?: { key?: string } }[] }).children?.map(child => child.props?.key)).toEqual(['band-row'])
+    } else {
+      expect(keysOf(drawn).slice(0, 2)).toEqual(['band', 'band-row'])
+    }
+    expect(JSON.stringify(second)).toContain('engine')
     await ui.unmount()
   }
-  expect(calls.belowMaxRows).toContain(5)
+  // Only before 2.1.323 do we pass the event on ourselves, one row shorter.
+  expect(calls.belowMaxRows.includes(5)).toBe(!isStacked)
 })
 
 test('when the band below throws, our row is drawn alone', { options: TEST_OPTIONS }, async ($, on) => {

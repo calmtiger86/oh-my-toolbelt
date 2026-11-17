@@ -48,7 +48,15 @@ test('pressed again while its command waits for the turn, a button is not queued
   const held = new Promise<void>(resolve => (release = resolve))
   let enter = (): void => undefined
   const entered = new Promise<void>(resolve => (enter = resolve))
-  on('command.run', { command: 'usage' }, async (_, e, next) => (enter(), await held, next(e)))
+  let ran = (): void => undefined
+  const ranDone = new Promise<void>(resolve => (ran = resolve))
+  on('command.run', { command: 'usage' }, async (_, e, next) => {
+    enter()
+    await held
+    const result = await next(e)
+    ran()
+    return result
+  })
   stubTurns(on)
   const { calls } = await boot($, on, { store: { buttons: seedButtons() } })
   const ui = await mountBand($, 'terminal', 258)
@@ -61,6 +69,8 @@ test('pressed again while its command waits for the turn, a button is not queued
   await endTurn($, 1)
   release()
   await first
+  // The press can return before the command has run, so wait for the run itself.
+  await ranDone
   expect(calls.ran).toEqual([USAGE])
   await ui.unmount()
 })

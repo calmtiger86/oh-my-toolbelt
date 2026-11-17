@@ -2,6 +2,16 @@
 
 All notable changes to Oh My Toolbelt are listed here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses [Semantic Versioning](https://semver.org/). Installs update when `version` in `.claude-plugin/plugin.json` goes up.
 
+## [0.1.4] - 2026-11-17
+
+### Changed
+
+- **Toolbelt**: Claude Code 2.1.323 and later stack each mod's row above the prompt themselves. The toolbelt now leaves that to Claude Code and draws only its own row. Nothing changes on screen, and earlier Claude Code versions keep the old behavior.
+
+### Fixed
+
+- **Prompts tab**: with an agent team, messages that start with a teammate going idle were listed as a prompt, shown as the notice's code (`{"type":"idle_notification",…}`), and after a restart messages from other sessions were listed as `Another Claude session sent a message:`. Neither is listed now.
+
 ## [0.1.3] - 2026-10-31
 
 ### Fixed

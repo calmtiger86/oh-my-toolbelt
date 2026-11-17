@@ -877,8 +877,9 @@ export const register: Register = (on, options) => {
     const isFolded = await isBandFolded(engineOf($))
     const model = isFolded ? null : bandModel(await bandCtx($, e.surface), props.bodyColumns, runtime.knownCommands)
     if (model === null && !isFolded) return next(e)
-    // Another mod's band goes below ours, one row shorter; if it fails, ours draws alone.
-    const other = await next({ ...e, props: { ...props, maxRows: Math.max(0, props.maxRows - 1) } }).catch(() => undefined)
+    // From 2.1.323 the engine asks each plugin for its own row (`e.plugin` is set) and stacks them, so ours draws alone.
+    // Before that, another mod's band goes below ours, one row shorter; if it fails, ours draws alone.
+    const other = e.plugin !== undefined ? undefined : await next({ ...e, props: { ...props, maxRows: Math.max(0, props.maxRows - 1) } }).catch(() => undefined)
     const press = (id: string, surface: RenderSurface) => attempt($, `press ${id}`, () => pressItem($, id, surface), undefined)
     if (model === null) return drawFolded($.ui.resolve(e), press, other)
     return drawBand($.ui.resolve(e), model, press, other, tocBandCards(props.bodyColumns, tr()), props.bodyColumns)

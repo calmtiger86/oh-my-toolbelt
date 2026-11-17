@@ -100,6 +100,30 @@ test('a prompt is text that is not blank, not the engine\'s wrapper and not a sl
   }
 })
 
+// Regression: the transcript file stores another session's message behind the engine's own line, so it was listed as
+// that line (2.1.326).
+test('another session\'s message is not a prompt', () => {
+  expect(promptOf('Another Claude session sent a message:\n<teammate-message teammate_id="reviewer-a" color="cyan">\nDone.\n</teammate-message>')).toBeUndefined()
+  // That line with no wrapper after it is the person's words.
+  expect(promptOf('Another Claude session sent a message: what does it mean?')).toBe('Another Claude session sent a message: what does it mean?')
+})
+
+// Regression: a drawn row of another session's messages that opens with an agent team notice (a teammate gone idle)
+// was listed as that notice's JSON: the row is `unclassified` and names no sender, and its text is the messages'
+// bodies joined by a blank line (2.1.326). A row the person sent with the same text stays theirs.
+test('a drawn row that opens with an agent team notice is no one\'s prompt', () => {
+  const unclassified = { kind: 'unclassified' } as PromptOrigin
+  const idle = '{"type":"idle_notification","from":"reviewer-a","timestamp":"2026-11-15T16:58:00.114Z","idleReason":"available"}'
+  const batched = `${idle}\n\nFinal check: no HIGH left\nThe verdict is COMMENT.\n\n${idle}`
+  for (const text of [idle, batched, ` ${idle}\n`, '{\n  "type": "shutdown_request",\n  "from": "team-lead"\n}\n\nDone.', `${idle}\r\n\r\nDone.`, `${idle} \n\nDone.`]) {
+    expect(isTocRow({ origin: unclassified, text }, OWN)).toBe(false)
+  }
+  expect(isTocRow({ origin: { kind: 'composer' } as PromptOrigin, text: batched }, OWN)).toBe(true)
+  for (const text of ['Fix the bug', '{"text":"no type"}', '{"type":"idle_notification" is what I see, why?', `Look at this:\n\n${idle}`]) {
+    expect(isTocRow({ origin: unclassified, text }, OWN)).toBe(true)
+  }
+})
+
 // A pasted block's tags are the engine's: a prompt that opens with one was listed as `<pasted_content id="cc96">`.
 test('a pasted block is kept without the tags around it', () => {
   expect(promptOf('\n\n<pasted_content id="cc96">\nRead the brief first.\nThen start.\n</pasted_content id="cc96">\n')).toBe('Read the brief first.\nThen start.')

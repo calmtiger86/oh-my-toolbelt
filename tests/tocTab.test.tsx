@@ -67,6 +67,10 @@ test('a slash command, the engine\'s wrapper, a blank row and a message someone 
   await mountPrompt($, 'm6', 'The tests pass now', { kind: 'unclassified' }, { from: { name: 'researcher' } })
   await mountPrompt($, 'm7', 'A shell finished', { kind: 'unclassified' }, { task: { id: 'b1', status: 'completed' } })
   await mountPrompt($, 'm8', 'From before origins were stamped', { kind: 'unclassified' })
+  // Another session's messages drawn as one row that opens with a teammate gone idle: their bodies joined by a blank
+  // line, with no sender on the row (2.1.326).
+  const idle = '{"type":"idle_notification","from":"reviewer-a","idleReason":"available"}'
+  await mountPrompt($, 'm9', `${idle}\n\nFinal check: no HIGH left\nThe verdict is COMMENT.\n\n${idle}`, { kind: 'unclassified' })
   await clock.advance(300)
   for (const surface of SURFACES) {
     const pane = await mountPane($, surface)

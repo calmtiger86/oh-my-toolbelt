@@ -56,6 +56,8 @@ export type Calls = {
   closed: number
   // What the engine stand-in for the band below ours was asked to draw with.
   belowMaxRows: number[]
+  // The `plugin` of each of those draws: the engine names a plugin from 2.1.323, and the older one leaves it out.
+  belowPlugins: (string | undefined)[]
   // Lines sent to `$.ui.log`.
   logged: string[]
 }
@@ -153,7 +155,7 @@ function stubSurface(on: On, o: BootOptions, calls: Calls): void {
   // Stands for another mod's band (and anything else drawn beneath ours).
   on('ui.render', ($, e) => {
     if (o.belowThrows) throw new Error('the band below failed')
-    if (e.component === 'AbovePrompt') calls.belowMaxRows.push(e.props.maxRows)
+    if (e.component === 'AbovePrompt') (calls.belowMaxRows.push(e.props.maxRows), calls.belowPlugins.push(e.plugin))
     return $.ui.resolve(e).Text({ children: 'engine' })
   })
 }
@@ -169,7 +171,7 @@ function stubFailures(on: On, o: BootOptions): void {
 
 export async function boot($: Engine, on: On, o: BootOptions = {}): Promise<Booted> {
   const store = new Map(Object.entries(o.store ?? {}))
-  const calls: Calls = { registered: [], immediate: [], ran: [], filled: [], fillModes: [], submitted: [], toasts: [], notified: [], played: [], opened: [], invalidated: 0, closed: 0, belowMaxRows: [], logged: [] }
+  const calls: Calls = { registered: [], immediate: [], ran: [], filled: [], fillModes: [], submitted: [], toasts: [], notified: [], played: [], opened: [], invalidated: 0, closed: 0, belowMaxRows: [], belowPlugins: [], logged: [] }
   stubEngine(on, o, store, calls)
   stubSurface(on, o, calls)
   stubFailures(on, o)
@@ -188,6 +190,7 @@ export function runCommand($: Engine, command: 'toolbelt' | 'tb', args: string, 
 
 export const bandProps = (bodyColumns: number, over: { hasSurvey?: boolean; agentId?: string } = {}) => ({
   hasSurvey: over.hasSurvey ?? false,
+  isCollapsed: false,
   isWorking: false,
   maxRows: 6,
   bodyColumns,

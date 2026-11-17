@@ -316,6 +316,13 @@ test('a teammate\'s message is not a prompt', () => {
   expect(parseRow(user(1, null, '<teammate-message teammate_id="researcher">done</teammate-message>', { origin: undefined }))?.kind).toBe('other')
 })
 
+// Regression: another session's message is stored behind the engine's own line, with no origin (2.1.326).
+test('another session\'s message is not a prompt', () => {
+  const framed = (body: string) => `Another Claude session sent a message:\n<teammate-message teammate_id="reviewer-a" color="cyan">\n${body}\n</teammate-message>`
+  expect(parseRow(user(1, null, framed('Done: no HIGH left.'), { origin: undefined }))?.kind).toBe('other')
+  expect(parseRow(user(2, 1, framed('{"type":"idle_notification","from":"reviewer-a","idleReason":"available"}'), { origin: undefined }))?.kind).toBe('other')
+})
+
 test('a line that is not a row is passed over: broken JSON, no uuid, odd types, a giant line', () => {
   expect(parseRow('{"type":"user","uuid":')).toBeUndefined()
   expect(parseRow('not json at all')).toBeUndefined()
