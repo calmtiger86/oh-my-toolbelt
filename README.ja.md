@@ -57,7 +57,7 @@ Claude Code の中から:
 
 マーケットプレイスを追加するか聞かれたら `y`、範囲は Enter を押します。続いて設定画面が出たら、各行で Enter を押して既定値のままにし、Save を押します。
 
-更新は `claude plugin update oh-my-toolbelt` のあと、Claude Code で `/reload-plugins` と入力するか、Claude Code を再起動します（変更点は [CHANGELOG.md](CHANGELOG.md)、英語）。削除は `claude plugin uninstall oh-my-toolbelt` です。
+更新は `claude plugin update oh-my-toolbelt` のあと、Claude Code で `/reload-plugins` と入力するか、Claude Code を再起動します（変更点は [CHANGELOG.md](CHANGELOG.md)、英語）。削除は `claude plugin uninstall oh-my-toolbelt` です。Claude Code はこのマーケットプレイスのプラグインを自動では更新しません。セッション開始時に新しいバージョンを自動で受け取るには、`/plugin` で **Marketplaces** タブを開き、oh-my-toolbelt を選んで **Enable auto-update** を選びます。
 
 </details>
 

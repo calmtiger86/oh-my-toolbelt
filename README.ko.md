@@ -57,7 +57,7 @@ Claude Code 안에서:
 
 마켓플레이스를 추가할지 물으면 `y`, 범위는 Enter를 누릅니다. 이어서 설정 화면이 나오면 줄마다 Enter로 기본값을 두고 Save를 누릅니다.
 
-업데이트는 `claude plugin update oh-my-toolbelt` 뒤 Claude Code에서 `/reload-plugins`를 입력하거나 Claude Code를 다시 시작하면 되고(바뀐 내용은 [CHANGELOG.md](CHANGELOG.md), 영어), 지우려면 `claude plugin uninstall oh-my-toolbelt`를 입력합니다.
+업데이트는 `claude plugin update oh-my-toolbelt` 뒤 Claude Code에서 `/reload-plugins`를 입력하거나 Claude Code를 다시 시작하면 되고(바뀐 내용은 [CHANGELOG.md](CHANGELOG.md), 영어), 지우려면 `claude plugin uninstall oh-my-toolbelt`를 입력합니다. Claude Code는 이 마켓플레이스의 플러그인을 스스로 업데이트하지 않습니다. 세션을 시작할 때 새 버전을 자동으로 받으려면 `/plugin`에서 **Marketplaces** 탭을 열고 oh-my-toolbelt를 골라 **Enable auto-update**를 누릅니다.
 
 </details>
 

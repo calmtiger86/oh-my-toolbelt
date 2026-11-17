@@ -57,7 +57,7 @@ Inside Claude Code:
 
 It asks to add the marketplace (`y`) and the scope (Enter), then shows the settings: press Enter on each row to keep its default, then Save.
 
-To update: `claude plugin update oh-my-toolbelt`, then type `/reload-plugins` in Claude Code or restart it; what changed is in [CHANGELOG.md](CHANGELOG.md). To remove: `claude plugin uninstall oh-my-toolbelt`.
+To update: `claude plugin update oh-my-toolbelt`, then type `/reload-plugins` in Claude Code or restart it; what changed is in [CHANGELOG.md](CHANGELOG.md). To remove: `claude plugin uninstall oh-my-toolbelt`. Claude Code does not update plugins from this marketplace by itself; to get each new version when a session starts, run `/plugin`, open the **Marketplaces** tab, select oh-my-toolbelt and choose **Enable auto-update**.
 
 </details>
 
